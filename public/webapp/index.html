@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Boutique</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="cart.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <div id="logoPh" class="logo-ph" aria-hidden="true">🛍️</div>
+      <img id="logo" alt="logo" />
+      <h1 id="shopTitle">Boutique</h1>
+    </div>
+    <nav class="tabs">
+      <button data-tab="products" class="active">Produits</button>
+      <button data-tab="description">Description</button>
+      <button data-tab="faq">FAQ</button>
+      <button data-tab="contact">Contact</button>
+    </nav>
+  </header>
+
+  <!-- bouton panier flottant -->
+  <button id="openCart" class="fab" aria-label="Voir le panier">🛍️</button>
+
+  <main id="app">
+    <section id="products" class="tab-panel active">
+      <div id="catalog"></div>
+    </section>
+    <section id="description" class="tab-panel">
+      <div id="descText"></div>
+    </section>
+    <section id="faq" class="tab-panel">
+      <pre id="faqText" class="pre"></pre>
+    </section>
+    <section id="contact" class="tab-panel">
+      <div id="contactBlock"></div>
+    </section>
+  </main>
+
+  <!-- Cart Modal -->
+  <dialog id="cartModal">
+    <form method="dialog" class="modal-card">
+      <header class="modal-header">
+        <h2 class="cart-title">Panier</h2>
+        <button id="closeCart" class="close" aria-label="Fermer">✕</button>
+      </header>
+      <section class="modal-body">
+        <!-- Étape 1 : récap panier -->
+        <div id="cartStep">
+          <div id="cartItems"></div>
+          <div class="row">
+            <button id="goCheckout" class="primary" type="button">Passer à la commande</button>
+          </div>
+        </div>
+        <!-- Étape 2 : livraison & paiement -->
+        <div id="deliveryStep" style="display:none">
+          <div class="row">
+            <label class="payment-option"><input type="radio" name="pay" value="cash" checked> Paiement cash</label>
+            <label class="payment-option"><input type="radio" name="pay" value="crypto"> Paiement crypto</label>
+          </div>
+          <div class="grid">
+            <input id="firstname" placeholder="Prénom">
+            <input id="lastname" placeholder="Nom">
+          </div>
+          <input id="address1" placeholder="Adresse complète (numéro, rue, etc.)">
+          <div class="grid">
+            <input id="postalCode" placeholder="Code postal">
+            <input id="city" placeholder="Ville">
+          </div>
+          <input id="country" placeholder="Pays">
+          <div class="row">
+            <button id="backToCart" type="button">Retour au panier</button>
+            <button id="placeOrder" class="primary" type="button" style="margin-left:auto">Valider ma commande</button>
+          </div>
+          <div id="result" class="note"></div>
+        </div>
+      </section>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+
+  <div id="lightbox" class="lb hidden" style="display:none"><button id="lbClose" class="lb-close" aria-label="Fermer">✕</button><div id="lbInner" class="lb-inner"></div></div>
+  <script src="enhance.js"></script>
+</body>
+</html>
