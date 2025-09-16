@@ -53,7 +53,8 @@ async function getFileUrl(fileId){
 
 /** ===== Menus Admin ===== **/
 function adminRootKb(){
-  return [[{ text:'🛒 Produits', callback_data:'admin:cat_products' }],
+  return [
+    [{ text:'🛒 Produits', callback_data:'admin:cat_products' }],
     [{ text:'📝 Textes', callback_data:'admin:cat_texts' }],
     [{ text:'🎨 Branding', callback_data:'admin:cat_branding' }],
     [{ text:'🔐 Accès', callback_data:'admin:cat_access' }],
@@ -61,8 +62,10 @@ function adminRootKb(){
     [{ text:'📞 Contact', callback_data:'admin:cat_contact' }],
     [{ text:'👑 Admins', callback_data:'admin:cat_admins' }],
     [{ text:'📈 Rapports', callback_data:'admin:cat_reports' }],
+    [{ text:'🧩 Patchs', callback_data:'admin:cat_patches' }]
   ];
 }
+
 function adminProductsKb(){
   return [
     [{ text:'📋 Lister', callback_data:'admin:prod_list' }],
@@ -728,11 +731,15 @@ async function triggerUpgrade(){
 }
 
 
-function adminPatchesKb(){
-  return [
-    [{ text:'🧾 Version', callback_data:'admin:version' }],
+
+function adminPatchesKb(showUpgrade){
+  const base = [
     [{ text:'📥 Appliquer un patch', callback_data:'admin:patch_wait' }],
-    [{ text:'🚀 Upgrade', callback_data:'admin:upgrade' }],
+    [{ text:'📜 Historique', callback_data:'admin:patch_history' }],
+    [{ text:'🧾 Version', callback_data:'admin:version' }],
     [{ text:'⬅️ Retour', callback_data:'admin:root' }]
   ];
+  if (showUpgrade) base.splice(2, 0, [{ text:'🚀 Upgrade', callback_data:'admin:upgrade' }]);
+  return base;
 }
+
