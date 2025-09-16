@@ -38,9 +38,6 @@ async function readJson(req) {
   });
 }
 function isAdmin(userId, settings) { const list=settings?.admins||[]; return list.includes(String(userId)); }
-async function adminSessionGet(id){ return (await kv.get(`adminSession:${id}`))||null; }
-async function adminSessionSet(id,s){ await kv.set(`adminSession:${id}`, s); }
-async function adminSessionClear(id){ await kv.del(`adminSession:${id}`); }
 async function send(text, chat_id, inlineKb){
   return BOT().post('/sendMessage',{ chat_id, text, parse_mode:'HTML', reply_markup: inlineKb ? { inline_keyboard: inlineKb } : undefined });
 }
