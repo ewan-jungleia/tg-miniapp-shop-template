@@ -398,30 +398,51 @@ async function onCallbackQuery(cbq){
 
 /** ===== Messages ===== **/
 async function onMessage(msg){
-  if (msg.document && (msg.caption||"").trim()==="/patch") { await handlePatchDocument(msg); return; }
-  if ((msg.text||"").startsWith("/rollback ")) { const v=(msg.text||"").split(" ")[1]; await handleRollback(msg.chat.id, msg.from.id, v); return; }
-  if ((msg.text||"").trim()==="/version") { await handleVersion(msg.chat.id); return; }
-  if ((msg.text||"").trim()==="/upgrade") { await handleUpgrade(msg.chat.id, msg.from.id); return; }
-  const __sessPatch = await adminSessionGet(msg.from.id);
-  if (__sessPatch && __sessPatch.flow==='patch' && __sessPatch.step==='wait_doc' && msg.document){
-    await handlePatchDocument(msg);
-    await adminSessionClear(msg.from.id);
-    return;
-  }
+  // --- Raccourcis commandes ---
+  if (msg && msg.document && (msg.caption||"").trim()==="/patch") { await handlePatchDocument(msg); return; }
+  if (msg && msg.text && msg.text.startsWith("/rollback ")) { const v=(msg.text||"").split(" ")[1]; await handleRollback(msg.chat.id, msg.from.id, v); return; }
+  if (msg && msg.text && (msg.text||"").trim()==="/version") { await handleVersion(msg.chat.id); return; }
+  if (msg && msg.text && (msg.text||"").trim()==="/upgrade") { await handleUpgrade(msg.chat.id, msg.from.id); return; }
 
-  if (msg.document && (msg.caption||"").trim()==="/patch") { await handlePatchDocument(msg); return; }
-  if ((msg.text||"").startsWith("/rollback ")) { const v=(msg.text||"").split(" ")[1]; await handleRollback(msg.chat.id, msg.from.id, v); return; }
-  if ((msg.text||"").trim()==="/version") { await handleVersion(msg.chat.id); return; }
-  if ((msg.text||"").trim()==="/upgrade") { await handleUpgrade(msg.chat.id, msg.from.id); return; }
+  // --- Mode 'Appliquer un patch' : accepte Document OU JSON en texte ---
+  try{
+    const __sessPatch = await adminSessionGet(msg.from.id);
+    if (__sessPatch && __sessPatch.flow==='patch' && __sessPatch.step==='wait_doc'){
+      if (msg.document){
+        await handlePatchDocument(msg);
+        await adminSessionClear(msg.from.id);
+        return;
+      }
+      if (typeof msg.text==='string'){
+        const t = msg.text.trim();
+        if (t.startsWith('{') && t.endsWith('}')){
+          try{
+            const manifest = JSON.parse(t);
+            const p = await preview(manifest, PATCH_SECRET);
+            await send(`PREVIEW OK\n${p.summary}\nCurrent: ${p.currentVersion}\nKeys: ${p.willWriteKeys.join(', ')}`, msg.chat.id);
+            const r = await apply(manifest, String(msg.from.id), PATCH_SECRET);
+            await send(`Patch applied. Backup: backup:${manifest.version}`, msg.chat.id);
+            await adminSessionSet(msg.from.id,{ flow:'patch', step:'applied' });
+            await send('Patch appliqué. Tu peux lancer un 🚀 Upgrade si besoin.', msg.chat.id, adminPatchesKb(true));
+            return;
+          }catch(e){
+            await send('Patch error (text): ' + (e && e.message || e), msg.chat.id);
+            return;
+          }
+        }
+      }
+    }
+  }catch(_){}
 
+  // --- Flux standard ---
   const chatId=msg.chat?.id; const fromId=msg.from?.id; let text=(msg.text||'').trim();
 
   let settings=await kv.get('settings');
   if (!settings){
     settings = {
-      shopName:'Your Store',
-      description:'Bienvenue dans votre boutique.',
-      faq:'Questions fréquentes : ...',
+      shopName:'Boutique',
+      description:'Bienvenue dans la boutique. Produits démo.',
+      faq:'Q: Livraison ?\nR: Par colis.\n\nQ: Paiement ?\nR: Cash ou crypto (redirigé vers contact humain en V1).',
       contactUsername:'TonContactHumain',
       privateMode:false, requiredChannel:'', channels:[],
       admins:[ String(fromId) ],
@@ -451,8 +472,6 @@ async function onMessage(msg){
 
   await sendHome(chatId);
 }
-
-/** ===== Flows ===== **/
 async function handleAdminFlowStep(msg, sess){
   const chatId=msg.chat.id; const userId=msg.from.id;
 
