@@ -714,15 +714,37 @@ async function handlePatchDocument(msg){
   const settings = (await kv.get('settings')) || {};
   if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId); return; }
   try {
-    const fid = msg.document.file_id;
+    // 1) Récupération du fichier JSON
+    const fid = msg.document?.file_id;
+    if (!fid){ await send('Aucun fichier reçu.', chatId); return; }
     const url = await getFileUrl(fid);
     const buf = await axios.get(url, { responseType:'arraybuffer' }).then(r=>Buffer.from(r.data));
     const manifest = JSON.parse(buf.toString('utf8'));
+
+    // 2) PREVIEW (sécurité)
     const p = await preview(manifest, PATCH_SECRET);
-    await send(`PREVIEW OK\n${p.summary}\nCurrent: ${p.currentVersion}\nKeys: ${p.willWriteKeys.join(', ')}`, chatId);
-    
-await send('Patch appliqué. Tu peux lancer un 🚀 Upgrade si besoin.', chatId, adminPatchesKb(true));
-if (manifest.upgrade === true) {
+    await send(`PREVIEW OK
+${p.summary}
+Current: ${p.currentVersion}
+Keys: ${p.willWriteKeys.join(', ')}`, chatId);
+
+    // 3) APPLY (écrit dans KV) + message
+    const r = await apply(manifest, String(userId), PATCH_SECRET);
+    await send(`Patch applied. Backup: backup:${manifest.version}`, chatId);
+
+    // 4) Historique (limite à 50 entrées)
+    try{
+      const hist = (await kv.get('patch:history')) || [];
+      hist.push({ at: Date.now(), from: p.currentVersion, to: manifest.version, rollback: false });
+      await kv.set('patch:history', hist.slice(-50));
+    }catch(_){}
+
+    // 5) Marque la session comme "applied" pour afficher 🚀 Upgrade
+    await adminSessionSet(userId,{ flow:'patch', step:'applied' });
+    await send('Patch appliqué. Tu peux lancer un 🚀 Upgrade si besoin.', chatId, adminPatchesKb(true));
+
+    // 6) Upgrade (optionnel selon le manifest)
+    if (manifest.upgrade === true) {
       const ok = await triggerUpgrade();
       await send(ok ? "🚀 Code upgrade déclenché (Vercel)" : "⚠️ Upgrade non déclenché (hook absent ou erreur)", chatId);
     }
