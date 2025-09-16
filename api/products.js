@@ -6,8 +6,8 @@ module.exports = async (req, res) => {
     if (req.method !== 'GET') { res.statusCode = 405; return res.end('Method Not Allowed'); }
 
     const defaults = {
-      shopName: 'Boutique',
-      description: "Bienvenue dans la boutique. Produits démo.",
+      shopName: 'Your Store',
+      description: "Bienvenue dans votre boutique.",
       faq: "Q: Livraison ?\nR: Par colis.\n\nQ: Paiement ?\nR: Cash ou crypto (redirigé vers contact humain en V1).",
       contactUsername: "TonContactHumain",
       logoUrl: "",
@@ -40,14 +40,7 @@ module.exports = async (req, res) => {
     }
 
     let products = await kv.get('products');
-    if (!products) {
-      products = [
-        { id: "p1", name: "Produit 1", unit: "1u = 100g", price_cash: 10, price_crypto: 9, description: "Démo produit 1", media: [] },
-        { id: "p2", name: "Produit 2", unit: "1u = 100g", price_cash: 20, price_crypto: 18, description: "Démo produit 2", media: [] },
-        { id: "p3", name: "Produit 3", unit: "1u = 100g", price_cash: 30, price_crypto: 27, description: "Démo produit 3", media: [] }
-      ];
-      await kv.set('products', products);
-    }
+    if (!products) { products = []; await kv.set('products', products); }
 
     res.setHeader('Content-Type', 'application/json');
     res.statusCode = 200;

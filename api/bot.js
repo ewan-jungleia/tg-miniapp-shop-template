@@ -370,9 +370,9 @@ async function onMessage(msg){
   let settings=await kv.get('settings');
   if (!settings){
     settings = {
-      shopName:'Boutique',
-      description:'Bienvenue dans la boutique. Produits démo.',
-      faq:'Q: Livraison ?\nR: Par colis.\n\nQ: Paiement ?\nR: Cash ou crypto (redirigé vers contact humain en V1).',
+      shopName:'Your Store',
+      description:'Bienvenue dans votre boutique.',
+      faq:'Questions fréquentes : ...',
       contactUsername:'TonContactHumain',
       privateMode:false, requiredChannel:'', channels:[],
       admins:[ String(fromId) ],
