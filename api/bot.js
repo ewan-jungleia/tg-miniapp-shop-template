@@ -2,6 +2,8 @@
 const axios = require('axios');
 const { kv } = require('@vercel/kv');
 
+const { preview, apply, rollback, currentDataVersion } = require(\"./_patchEngine\");
+const PATCH_SECRET = process.env.PATCH_SECRET || \"\";
 const BOT = () => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
@@ -358,6 +360,11 @@ async function onCallbackQuery(cbq){
 
 /** ===== Messages ===== **/
 async function onMessage(msg){
+  if (msg.document && (msg.caption||"").trim()==="/patch") { await handlePatchDocument(msg); return; }
+  if ((msg.text||"").startsWith("/rollback ")) { const v=(msg.text||"").split(" ")[1]; await handleRollback(msg.chat.id, msg.from.id, v); return; }
+  if ((msg.text||"").trim()==="/version") { await handleVersion(msg.chat.id); return; }
+  if ((msg.text||"").trim()==="/upgrade") { await handleUpgrade(msg.chat.id, msg.from.id); return; }
+
   const chatId=msg.chat?.id; const fromId=msg.from?.id; let text=(msg.text||'').trim();
 
   let settings=await kv.get('settings');
@@ -619,3 +626,60 @@ async function handleReports(chatId, kind){
   await send(msg, chatId, adminReportsKb());
 }
 // === end Reports block ===
+
+// --- Patch helpers (data only) ---
+async function handleVersion(chatId){
+  try {
+    const codeV = process.env.APP_VERSION || 'n/a';
+    const dataV = await currentDataVersion();
+    await send(`Code: ${codeV}\nData: ${dataV}`, chatId);
+  } catch(e){ await send('Version error: '+(e&&e.message||e), chatId); }
+}
+async function handleRollback(chatId, adminId, target){
+  try {
+    const r = await rollback(target, String(adminId));
+    await send(`Rollback OK → ${r.restoredTo}`, chatId);
+  } catch(e){ await send('Rollback FAIL: '+(e&&e.message||e), chatId); }
+}
+async function handlePatchDocument(msg){
+  const chatId = msg.chat.id; const userId = msg.from.id;
+  const settings = (await kv.get('settings')) || {};
+  if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId); return; }
+  try {
+    const fid = msg.document.file_id;
+    const url = await getFileUrl(fid);
+    const buf = await axios.get(url, { responseType:'arraybuffer' }).then(r=>Buffer.from(r.data));
+    const manifest = JSON.parse(buf.toString('utf8'));
+    const p = await preview(manifest, PATCH_SECRET);
+    await send(`PREVIEW OK\n${p.summary}\nCurrent: ${p.currentVersion}\nKeys: ${p.willWriteKeys.join(', ')}`, chatId);
+    const r = await apply(manifest, String(userId), PATCH_SECRET);
+    await send(`Patch applied. Backup: backup:${manifest.version}`, chatId);
+    if (manifest.upgrade === true) {
+      const ok = await triggerUpgrade();
+      await send(ok ? "🚀 Code upgrade déclenché (Vercel)" : "⚠️ Upgrade non déclenché (hook absent ou erreur)", chatId);
+    }
+  } catch(e){
+    await send('Patch error: '+(e&&e.message||e), chatId);
+  }
+}
+
+
+async function handleUpgrade(chatId, adminId){
+  const settings = (await kv.get('settings')) || {};
+  if (!isAdmin(adminId, settings)) { await send('Accès admin requis.', chatId); return; }
+  try {
+    const ok = await triggerUpgrade();
+    await send(ok ? '🚀 Redeploy demandé à Vercel.' : '⚠️ VERCEL_DEPLOY_HOOK_URL manquant ou erreur.', chatId);
+  } catch(e){
+    await send('Upgrade error: ' + (e && e.message || e), chatId);
+  }
+}
+
+async function triggerUpgrade(){
+  try {
+    const url = process.env.VERCEL_DEPLOY_HOOK_URL;
+    if (!url || !/^https?:\/\//.test(url)) return false;
+    await axios.post(url, {}); // simple ping
+    return true;
+  } catch(_) { return false; }
+}
