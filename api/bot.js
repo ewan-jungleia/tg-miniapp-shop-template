@@ -2,8 +2,8 @@
 const axios = require('axios');
 const { kv } = require('@vercel/kv');
 
-const { preview, apply, rollback, currentDataVersion } = require(\"./_patchEngine\");
-const PATCH_SECRET = process.env.PATCH_SECRET || \"\";
+const { preview, apply, rollback, currentDataVersion } = require('./_patchEngine');
+const PATCH_SECRET = process.env.PATCH_SECRET || '';
 const BOT = () => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
