@@ -695,7 +695,7 @@ async function handlePatchDocument(msg){
     const manifest = JSON.parse(buf.toString('utf8'));
     const p = await preview(manifest, PATCH_SECRET);
     await send(`PREVIEW OK\n${p.summary}\nCurrent: ${p.currentVersion}\nKeys: ${p.willWriteKeys.join(', ')}`, chatId);
-    \1await adminSessionSet(userId,{ flow:'patch', step:'applied' });
+    
 await send('Patch appliqué. Tu peux lancer un 🚀 Upgrade si besoin.', chatId, adminPatchesKb(true));
 if (manifest.upgrade === true) {
       const ok = await triggerUpgrade();
