@@ -53,7 +53,20 @@ async function getFileUrl(fileId){
 
 /** ===== Menus Admin ===== **/
 function adminRootKb(){
-  return [[{ text:'🛒 Produits', callback_data:'admin:cat_products' }],
+  return [
+    [{ text:'🛒 Produits', callback_data:'admin:cat_products' }],
+    [{ text:'📝 Textes', callback_data:'admin:cat_texts' }],
+    [{ text:'🎨 Branding', callback_data:'admin:cat_branding' }],
+    [{ text:'🔐 Accès', callback_data:'admin:cat_access' }],
+    [{ text:'📦 Formulaire', callback_data:'admin:cat_form' }],
+    [{ text:'📞 Contact', callback_data:'admin:cat_contact' }],
+    [{ text:'👑 Admins', callback_data:'admin:cat_admins' }],
+    [{ text:'📈 Rapports', callback_data:'admin:cat_reports' }],
+    [{ text:'🧩 Patchs', callback_data:'admin:cat_patches' }]
+  ];
+}
+
+],
     [{ text:'📝 Textes', callback_data:'admin:cat_texts' }],
     [{ text:'🎨 Branding', callback_data:'admin:cat_branding' }],
     [{ text:'🔐 Accès', callback_data:'admin:cat_access' }],
@@ -157,6 +170,30 @@ async function onCallbackQuery(cbq){
   }
   if (data==='admin:cat_contact'){ await send('Contact :', chatId, adminContactKb()); return; }
   if (data==='admin:cat_admins'){ await send('Admins :', chatId, adminAdminsKb()); return; }
+
+  if (data==='admin:cat_patches'){
+    const sess = await adminSessionGet(userId);
+    const showUp = !!(sess && sess.flow==='patch' && sess.step==='applied');
+    await send('🧩 Patchs :', chatId, adminPatchesKb(showUp));
+    return;
+  }
+  if (data==='admin:patch_wait'){
+    await adminSessionSet(userId,{ flow:'patch', step:'wait_doc' });
+    await send('Envoie le fichier JSON du patch (comme Document).', chatId, adminPatchesKb(false));
+    return;
+  }
+  if (data==='admin:patch_history'){
+    try{
+      const hist = (await kv.get('patch:history')) || [];
+      if (!hist.length){ await send('Aucun patch appliqué pour le moment.', chatId, adminPatchesKb(false)); return; }
+      const lines = hist.slice(-10).map(h=>`• ${h.at||'-'} : ${h.from||'?'} → ${h.to||'?'} ${h.rollback?'(rollback)':''}`).join('\n');
+      await send(`<b>Derniers patchs</b>\n${lines}`, chatId, adminPatchesKb(true));
+    }catch(e){ await send('Erreur historique: '+(e&&e.message||e), chatId); }
+    return;
+  }
+  if (data==='admin:version'){ await handleVersion(chatId); return; }
+  if (data==='admin:upgrade'){ await handleUpgrade(chatId, userId); return; }
+
 
   if (data==='admin:cat_patches'){
     const sess = await adminSessionGet(userId);
@@ -392,6 +429,17 @@ async function onCallbackQuery(cbq){
 
 /** ===== Messages ===== **/
 async function onMessage(msg){
+  if (msg.document && (msg.caption||"").trim()==="/patch") { await handlePatchDocument(msg); return; }
+  if ((msg.text||"").startsWith("/rollback ")) { const v=(msg.text||"").split(" ")[1]; await handleRollback(msg.chat.id, msg.from.id, v); return; }
+  if ((msg.text||"").trim()==="/version") { await handleVersion(msg.chat.id); return; }
+  if ((msg.text||"").trim()==="/upgrade") { await handleUpgrade(msg.chat.id, msg.from.id); return; }
+  const __sessPatch = await adminSessionGet(msg.from.id);
+  if (__sessPatch && __sessPatch.flow==='patch' && __sessPatch.step==='wait_doc' && msg.document){
+    await handlePatchDocument(msg);
+    await adminSessionClear(msg.from.id);
+    return;
+  }
+
   if (msg.document && (msg.caption||"").trim()==="/patch") { await handlePatchDocument(msg); return; }
   if ((msg.text||"").startsWith("/rollback ")) { const v=(msg.text||"").split(" ")[1]; await handleRollback(msg.chat.id, msg.from.id, v); return; }
   if ((msg.text||"").trim()==="/version") { await handleVersion(msg.chat.id); return; }
