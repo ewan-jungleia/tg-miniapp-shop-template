@@ -363,6 +363,7 @@ async function onMessage(msg){
   if (msg.document && (msg.caption||"").trim()==="/patch") { await handlePatchDocument(msg); return; }
   if ((msg.text||"").startsWith("/rollback ")) { const v=(msg.text||"").split(" ")[1]; await handleRollback(msg.chat.id, msg.from.id, v); return; }
   if ((msg.text||"").trim()==="/version") { await handleVersion(msg.chat.id); return; }
+  if ((msg.text||"").trim()==="/upgrade") { await handleUpgrade(msg.chat.id, msg.from.id); return; }
 
   const chatId=msg.chat?.id; const fromId=msg.from?.id; let text=(msg.text||'').trim();
 
@@ -653,7 +654,32 @@ async function handlePatchDocument(msg){
     await send(`PREVIEW OK\n${p.summary}\nCurrent: ${p.currentVersion}\nKeys: ${p.willWriteKeys.join(', ')}`, chatId);
     const r = await apply(manifest, String(userId), PATCH_SECRET);
     await send(`Patch applied. Backup: backup:${manifest.version}`, chatId);
+    if (manifest.upgrade === true) {
+      const ok = await triggerUpgrade();
+      await send(ok ? "🚀 Code upgrade déclenché (Vercel)" : "⚠️ Upgrade non déclenché (hook absent ou erreur)", chatId);
+    }
   } catch(e){
     await send('Patch error: '+(e&&e.message||e), chatId);
   }
+}
+
+
+async function handleUpgrade(chatId, adminId){
+  const settings = (await kv.get('settings')) || {};
+  if (!isAdmin(adminId, settings)) { await send('Accès admin requis.', chatId); return; }
+  try {
+    const ok = await triggerUpgrade();
+    await send(ok ? '🚀 Redeploy demandé à Vercel.' : '⚠️ VERCEL_DEPLOY_HOOK_URL manquant ou erreur.', chatId);
+  } catch(e){
+    await send('Upgrade error: ' + (e && e.message || e), chatId);
+  }
+}
+
+async function triggerUpgrade(){
+  try {
+    const url = process.env.VERCEL_DEPLOY_HOOK_URL;
+    if (!url || !/^https?:\/\//.test(url)) return false;
+    await axios.post(url, {}); // simple ping
+    return true;
+  } catch(_) { return false; }
 }
