@@ -398,6 +398,13 @@ async function onCallbackQuery(cbq){
 
 /** ===== Messages ===== **/
 async function onMessage(msg){
+  // Rattrapage: si un ADMIN envoie un document, on traite le patch directement
+  try{
+    if (msg && msg.document){
+      const s = (await kv.get('settings')) || {};
+      if (isAdmin(msg.from?.id, s)) { await handlePatchDocument(msg); return; }
+    }
+  }catch(_){/* ignore */}
   // --- Raccourcis commandes ---
   if (msg && msg.document && (msg.caption||"").trim()==="/patch") { await handlePatchDocument(msg); return; }
   if (msg && msg.text && msg.text.startsWith("/rollback ")) { const v=(msg.text||"").split(" ")[1]; await handleRollback(msg.chat.id, msg.from.id, v); return; }
