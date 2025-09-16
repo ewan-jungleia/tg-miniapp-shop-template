@@ -53,9 +53,7 @@ async function getFileUrl(fileId){
 
 /** ===== Menus Admin ===== **/
 function adminRootKb(){
-  return [
-        [{ text:'🧩 Patchs', callback_data:'admin:cat_patches' }],
-[{ text:'🛒 Produits', callback_data:'admin:cat_products' }],
+  return [[{ text:'🛒 Produits', callback_data:'admin:cat_products' }],
     [{ text:'📝 Textes', callback_data:'admin:cat_texts' }],
     [{ text:'🎨 Branding', callback_data:'admin:cat_branding' }],
     [{ text:'🔐 Accès', callback_data:'admin:cat_access' }],
@@ -159,6 +157,29 @@ async function onCallbackQuery(cbq){
   }
   if (data==='admin:cat_contact'){ await send('Contact :', chatId, adminContactKb()); return; }
   if (data==='admin:cat_admins'){ await send('Admins :', chatId, adminAdminsKb()); return; }
+
+  if (data==='admin:cat_patches'){
+    const sess = await adminSessionGet(userId);
+    const showUp = !!(sess && sess.flow==='patch' && sess.step==='applied');
+    await send('🧩 Patchs :', chatId, adminPatchesKb(showUp));
+    return;
+  }
+  if (data==='admin:version'){ await handleVersion(chatId); return; }
+  if (data==='admin:patch_wait'){
+    await adminSessionSet(userId,{ flow:'patch', step:'wait_doc' });
+    await send('Envoie le fichier JSON du patch (comme *Document*).', chatId, adminPatchesKb(false));
+    return;
+  }
+  if (data==='admin:patch_history'){
+    try{
+      const hist = (await kv.get('patch:history')) || [];
+      if (!hist.length){ await send('Aucun patch appliqué pour le moment.', chatId, adminPatchesKb(false)); return; }
+      const lines = hist.slice(-10).map(h=>`• ${h.at||'-'} : ${h.from||'?'} → ${h.to||'?'} ${h.rollback?'(rollback)':''}`).join('\n');
+      await send(`<b>Derniers patchs</b>\n${lines}`, chatId, adminPatchesKb(true));
+    }catch(e){ await send('Erreur historique: '+(e&&e.message||e), chatId); }
+    return;
+  }
+
 
   if (data==='admin:cat_patches'){ await send('🧩 Patchs :', chatId, adminPatchesKb()); return; }
   if (data==='admin:version'){ await handleVersion(chatId); return; }
@@ -674,9 +695,9 @@ async function handlePatchDocument(msg){
     const manifest = JSON.parse(buf.toString('utf8'));
     const p = await preview(manifest, PATCH_SECRET);
     await send(`PREVIEW OK\n${p.summary}\nCurrent: ${p.currentVersion}\nKeys: ${p.willWriteKeys.join(', ')}`, chatId);
-    const r = await apply(manifest, String(userId), PATCH_SECRET);
-    await send(`Patch applied. Backup: backup:${manifest.version}`, chatId);
-    if (manifest.upgrade === true) {
+    \1await adminSessionSet(userId,{ flow:'patch', step:'applied' });
+await send('Patch appliqué. Tu peux lancer un 🚀 Upgrade si besoin.', chatId, adminPatchesKb(true));
+if (manifest.upgrade === true) {
       const ok = await triggerUpgrade();
       await send(ok ? "🚀 Code upgrade déclenché (Vercel)" : "⚠️ Upgrade non déclenché (hook absent ou erreur)", chatId);
     }
