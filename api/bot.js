@@ -1,6 +1,12 @@
 // api/bot.js
 const axios = require('axios');
 const { kv } = require('@vercel/kv');
+// --- admin session (KV) ---
+const ADMIN_SESS_PREFIX = 'admin:sess:';
+async function adminSessionGet(uid){ try{ return (await kv.get(ADMIN_SESS_PREFIX+uid)) || null; }catch(_){ return null; } }
+async function adminSessionSet(uid, obj){ try{ await kv.set(ADMIN_SESS_PREFIX+uid, obj); }catch(_){ } }
+async function adminSessionClear(uid){ try{ await kv.del(ADMIN_SESS_PREFIX+uid); }catch(_){ } }
+
 
 const { preview, apply, rollback, currentDataVersion } = require('./_patchEngine');
 const PATCH_SECRET = process.env.PATCH_SECRET || '';
