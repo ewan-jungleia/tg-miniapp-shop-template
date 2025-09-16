@@ -23,6 +23,7 @@ module.exports = async (req, res) => {
       res.statusCode = 401; return res.end('Unauthorized');
     }
     const update = await readJson(req);
+    try { const t = update.callback_query?'callback_query':(update.message?'message':'?'); console.log('[BOT] update type=', t, 'keys=', Object.keys(update||{})); } catch(_){}
     if (update.callback_query) {
       await onCallbackQuery(update.callback_query);
     } else if (update.message) {
@@ -397,7 +398,17 @@ async function onCallbackQuery(cbq){
 }
 
 /** ===== Messages ===== **/
+
 async function onMessage(msg){
+// ---- DIAG DOC ----
+  try {
+    console.log('[BOT] onMessage keys=', Object.keys(msg||{}));
+    if (msg && msg.document) {
+      const name = (msg.document.file_name||'inconnu');
+      try { await send('📄 Doc reçu: '+name+' — traitement…', msg.chat.id); } catch(_){}
+    }
+  } catch(_){}
+
   // Rattrapage: si un ADMIN envoie un document, on traite le patch directement
   try{
     if (msg && msg.document){
