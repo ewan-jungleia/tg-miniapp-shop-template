@@ -23,7 +23,7 @@ function prettyErr(e){
   }catch(_){ return String(e); }
 }
 const { preview, apply, rollback, currentDataVersion } = require('./_patchEngine');
-const PATCH_SECRET = process.env.PATCH_SECRET || '';
+const PATCH_SECRET = '';
 const BOT = () => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
