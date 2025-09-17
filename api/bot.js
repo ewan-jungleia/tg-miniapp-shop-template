@@ -8,6 +8,20 @@ async function adminSessionSet(uid, obj){ try{ await kv.set(ADMIN_SESS_PREFIX+ui
 async function adminSessionClear(uid){ try{ await kv.del(ADMIN_SESS_PREFIX+uid); }catch(_){ } }
 
 
+
+
+function prettyErr(e){
+  try{
+    if (e && e.response){
+      const status = e.response.status;
+      let payload = e.response.data;
+      if (typeof payload !== 'string') payload = JSON.stringify(payload);
+      if (payload && payload.length > 1200) payload = payload.slice(0,1200) + '…';
+      return 'HTTP '+status+' — '+payload;
+    }
+    return String(e && e.message || e);
+  }catch(_){ return String(e); }
+}
 const { preview, apply, rollback, currentDataVersion } = require('./_patchEngine');
 const PATCH_SECRET = process.env.PATCH_SECRET || '';
 const BOT = () => {
@@ -753,7 +767,7 @@ async function handlePatchDocument(msg){
     try {
       p = await preview(manifest, PATCH_SECRET);
     } catch(e){
-      await send('Patch error (preview): '+(e && e.message || e), chatId);
+      await send('Patch error (preview): '+prettyErr(e), chatId);
       return;
     }
 
@@ -769,7 +783,7 @@ async function handlePatchDocument(msg){
     try {
       await apply(manifest, String(userId), PATCH_SECRET);
     } catch(e){
-      await send('Patch error (apply): '+(e && e.message || e), chatId);
+      await send('Patch error (apply): '+prettyErr(e), chatId);
       return;
     }
 
@@ -789,7 +803,7 @@ async function handlePatchDocument(msg){
       await send('Tu peux lancer un Upgrade si besoin.', chatId, adminPatchesKb(true));
     }
   } catch(e){
-    await send('Patch error: '+(e && e.message || e), chatId);
+    await send('Patch error: '+prettyErr(e), chatId);
   }
 }
 
