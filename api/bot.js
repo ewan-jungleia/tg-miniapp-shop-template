@@ -164,7 +164,7 @@ async function onCallbackQuery(cbq){
   try { await BOT().post('/answerCallbackQuery',{ callback_query_id: cbq.id }); } catch (_) {}
   let settings=await kv.get('settings');
   if (!settings){ settings={admins:[String(userId)]}; await kv.set('settings', settings); }
-  if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId); return; }
+  if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId, null, true); return; }
 
   // Root & catégories
   if (data==='admin:root'){ await send('Panneau admin :', chatId, adminRootKb()); return; }
