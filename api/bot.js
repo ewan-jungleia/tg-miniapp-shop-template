@@ -777,7 +777,7 @@ async function handlePatchDocument(msg){
       + 'Current: '+(p.currentVersion||'?')+'\n'
       + 'Keys: '+((p.willWriteKeys||[]).join(', ')||'(aucune)'),
       chatId
-    );
+    , null, true);
 
     await send('Application du patch…', chatId);
     try {
