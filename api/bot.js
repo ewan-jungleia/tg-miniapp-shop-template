@@ -53,8 +53,8 @@ async function readJson(req) {
   });
 }
 function isAdmin(userId, settings) { const list=settings?.admins||[]; return list.includes(String(userId)); }
-async function send(text, chat_id, inlineKb){
-  return BOT().post('/sendMessage',{ chat_id, text, parse_mode:'HTML', reply_markup: inlineKb ? { inline_keyboard: inlineKb } : undefined });
+async function send(text, chat_id, inlineKb, plain=false){
+  return BOT().post('/sendMessage',{ chat_id, text, parse_mode: plain ? undefined : 'HTML', reply_markup: inlineKb ? { inline_keyboard: inlineKb } : undefined });
 }
 function userHomeKb(){
   const webappUrl=process.env.WEBAPP_URL;
