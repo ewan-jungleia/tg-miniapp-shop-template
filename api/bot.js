@@ -729,48 +729,69 @@ async function handleRollback(chatId, adminId, target){
 }
 async function handlePatchDocument(msg){
   const chatId = msg.chat.id; const userId = msg.from.id;
-  const settings = (await kv.get('settings')) || {};
-  if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId); return; }
   try {
-    // 1) Récupération du fichier JSON
-    const fid = msg.document?.file_id;
-    if (!fid){ await send('Aucun fichier reçu.', chatId); return; }
+    const settings = (await kv.get('settings')) || {};
+    if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId); return; }
+
+    if (!msg.document || !msg.document.file_id) {
+      await send('Patch error: document manquant.', chatId);
+      return;
+    }
+
+    await send('Récupération du fichier…', chatId);
+    const fid = msg.document.file_id;
     const url = await getFileUrl(fid);
+    if (!url) { await send('Patch error: URL de fichier introuvable.', chatId); return; }
+
     const buf = await axios.get(url, { responseType:'arraybuffer' }).then(r=>Buffer.from(r.data));
-    const manifest = JSON.parse(buf.toString('utf8'));
+    let manifest;
+    try { manifest = JSON.parse(buf.toString('utf8')); }
+    catch(e){ await send('Patch error: JSON invalide ('+(e && e.message || e)+')', chatId); return; }
 
-    // 2) PREVIEW (sécurité)
-    const p = await preview(manifest, PATCH_SECRET);
-    await send(`PREVIEW OK
-${p.summary}
-Current: ${p.currentVersion}
-Keys: ${p.willWriteKeys.join(', ')}`, chatId);
+    await send('Preview en cours…', chatId);
+    let p;
+    try {
+      p = await preview(manifest, PATCH_SECRET);
+    } catch(e){
+      await send('Patch error (preview): '+(e && e.message || e), chatId);
+      return;
+    }
 
-    // 3) APPLY (écrit dans KV) + message
-    const r = await apply(manifest, String(userId), PATCH_SECRET);
-    await send(`Patch applied. Backup: backup:${manifest.version}`, chatId);
+    await send(
+      'PREVIEW OK\n'
+      + (p.summary||'') + '\n'
+      + 'Current: '+(p.currentVersion||'?')+'\n'
+      + 'Keys: '+((p.willWriteKeys||[]).join(', ')||'(aucune)'),
+      chatId
+    );
 
-    // 4) Historique (limite à 50 entrées)
-    try{
+    await send('Application du patch…', chatId);
+    try {
+      await apply(manifest, String(userId), PATCH_SECRET);
+    } catch(e){
+      await send('Patch error (apply): '+(e && e.message || e), chatId);
+      return;
+    }
+
+    try {
       const hist = (await kv.get('patch:history')) || [];
-      hist.push({ at: Date.now(), from: p.currentVersion, to: manifest.version, rollback: false });
-      await kv.set('patch:history', hist.slice(-50));
-    }catch(_){}
+      hist.push({ at: Date.now(), from: (p && p.currentVersion)||null, to: manifest.version||null, by: String(userId) });
+      await kv.set('patch:history', hist);
+    } catch(_) {}
 
-    // 5) Marque la session comme "applied" pour afficher 🚀 Upgrade
+    await send('Patch applied. Backup: backup:'+String(manifest.version||'?'), chatId);
     await adminSessionSet(userId,{ flow:'patch', step:'applied' });
-    await send('Patch appliqué. Tu peux lancer un 🚀 Upgrade si besoin.', chatId, adminPatchesKb(true));
 
-    // 6) Upgrade (optionnel selon le manifest)
     if (manifest.upgrade === true) {
       const ok = await triggerUpgrade();
-      await send(ok ? "🚀 Code upgrade déclenché (Vercel)" : "⚠️ Upgrade non déclenché (hook absent ou erreur)", chatId);
+      await send(ok ? "Code upgrade déclenché (Vercel)" : "Upgrade non déclenché (hook absent ou erreur)", chatId);
+    } else {
+      await send('Tu peux lancer un Upgrade si besoin.', chatId, adminPatchesKb(true));
     }
   } catch(e){
-    await send('Patch error: '+(e&&e.message||e), chatId);
+    await send('Patch error: '+(e && e.message || e), chatId);
   }
 }
-
 
 async function handleUpgrade(chatId, adminId){
   const settings = (await kv.get('settings')) || {};
