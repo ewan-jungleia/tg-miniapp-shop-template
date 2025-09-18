@@ -71,23 +71,53 @@ function renderCatalog() {
       card.appendChild(gal);
     }
 
-    const unitInfo = p.unit ? ` (${p.unit})` : '';
+    const hasVariants = Array.isArray(p.quantities) && p.quantities.length>0;
+    const unitInfo = (!hasVariants && p.unit) ? ` (${p.unit})` : '';
+    const baseCash = fmtEUR(p.price_cash||0);
+    const baseCrypto = fmtEUR(p.price_crypto||0);
+
+    // Bloc prix (dyn si variantes)
+    let priceBlock = '';
+    if (hasVariants) {
+      const first = p.quantities[0] || {price_cash:0, price_crypto:0};
+      priceBlock = `
+        <div class="row" style="margin-left:auto; gap:16px;">
+          <div>Prix cash : <span id="pc-${p.id}">${fmtEUR(first.price_cash||0)}</span></div>
+          <div>Prix crypto : <span id="pr-${p.id}">${fmtEUR(first.price_crypto||0)}</span></div>
+        </div>`;
+    } else {
+      priceBlock = `
+        <div class="row" style="margin-left:auto; gap:16px;">
+          <div>Prix cash : ${baseCash}</div>
+          <div>Prix crypto : ${baseCrypto}</div>
+        </div>`;
+    }
+
+    // Select variantes si présent
+    let variantHtml = '';
+    if (hasVariants) {
+      const opts = p.quantities.map((q,i)=>`<option value="${i}">${q.label} — ${fmtEUR(q.price_cash||0)} / ${fmtEUR(q.price_crypto||0)}</option>`).join('');
+      variantHtml = `
+        <div class="row" style="margin:8px 0;">
+          <label style="margin-right:8px;">Quantité</label>
+          <select class="variantSel" data-id="${p.id}">${opts}</select>
+        </div>`;
+    }
+
     card.innerHTML += `
       <h3>${p.name}</h3>
       <div class="row">${p.description || ''}</div>
+      ${variantHtml}
       <div class="row">
         <div class="qty">
-          <label>Qté${unitInfo}</label>
+          <label>Qté${unitInfo}${hasVariants?' (x packs)':''}</label>
           <div class="qtybox">
             <button type="button" class="minus" data-id="${p.id}">−</button>
             <input type="number" min="1" value="1" data-id="${p.id}" class="qtyInput">
             <button type="button" class="plus" data-id="${p.id}">+</button>
           </div>
         </div>
-        <div class="row" style="margin-left:auto; gap:16px;">
-          <div>Prix cash : ${fmtEUR(p.price_cash)}</div>
-          <div>Prix crypto : ${fmtEUR(p.price_crypto)}</div>
-        </div>
+        ${priceBlock}
       </div>
       <button class="primary" data-add="${p.id}">Ajouter au panier</button>
     `;
@@ -98,7 +128,7 @@ function renderCatalog() {
   root.querySelectorAll('button.minus').forEach(b=>{
     b.onclick = ()=>{
       const id=b.getAttribute('data-id');
-      const input = root.querySelector(`input.qtyInput[data-id="${id}"]`);
+      const input = root.querySelector(\`input.qtyInput[data-id="\${id}"]\`);
       const v = Math.max(1, (parseInt(input.value,10)||1) - 1);
       input.value = v;
     };
@@ -106,24 +136,39 @@ function renderCatalog() {
   root.querySelectorAll('button.plus').forEach(b=>{
     b.onclick = ()=>{
       const id=b.getAttribute('data-id');
-      const input = root.querySelector(`input.qtyInput[data-id="${id}"]`);
+      const input = root.querySelector(\`input.qtyInput[data-id="\${id}"]\`);
       input.value = Math.max(1, (parseInt(input.value,10)||1) + 1);
     };
   });
 
-  // Ajouter au panier sans popup
+  // variantes: maj prix à la volée
+  root.querySelectorAll('select.variantSel').forEach(sel=>{
+    sel.onchange = ()=>{
+      const id = sel.getAttribute('data-id');
+      const p = state.products.find(x=>x.id===id);
+      if (!p) return;
+      const idx = parseInt(sel.value,10)||0;
+      const v = (Array.isArray(p.quantities)&&p.quantities[idx]) ? p.quantities[idx] : null;
+      if (!v) return;
+      const pc = document.getElementById('pc-'+id);
+      const pr = document.getElementById('pr-'+id);
+      if (pc) pc.textContent = fmtEUR(v.price_cash||0);
+      if (pr) pr.textContent = fmtEUR(v.price_crypto||0);
+    };
+  });
+
+  // Ajouter au panier
   root.querySelectorAll('button[data-add]').forEach(btn=>{
     btn.onclick = ()=>{
       const id = btn.getAttribute('data-add');
       const p = state.products.find(x=>x.id===id);
-      const input = root.querySelector(`input.qtyInput[data-id="${id}"]`);
+      const input = root.querySelector(\`input.qtyInput[data-id="\${id}"]\`);
       const qty = Math.max(1, parseInt(input.value,10) || 1);
       addToCart(p, qty);
       openCart('cart');
     };
   });
 }
-
 function mediaEl(m) {
   if (m.type==='photo') { const img = document.createElement('img'); img.src=m.url; img.alt=''; return img; }
   if (m.type==='video') { const v = document.createElement('video'); v.src=m.url; v.controls=true; return v; }
@@ -131,13 +176,34 @@ function mediaEl(m) {
 }
 
 function addToCart(p, qty) {
-  const existing = state.cart.items.find(x=>x.id===p.id);
+  const hasVariants = Array.isArray(p.quantities) && p.quantities.length>0;
+  let price_cash = Number(p.price_cash||0);
+  let price_crypto = Number(p.price_crypto||0);
+  let variantLabel = '';
+
+  if (hasVariants) {
+    const sel = document.querySelector(`select.variantSel[data-id="${p.id}"]`);
+    const idx = sel ? (parseInt(sel.value,10)||0) : 0;
+    const v = p.quantities[idx] || {label:'', price_cash:0, price_crypto:0};
+    price_cash = Number(v.price_cash||0);
+    price_crypto = Number(v.price_crypto||0);
+    variantLabel = String(v.label||'');
+  }
+
+  const existing = state.cart.items.find(x=>x.id===p.id && String(x.variantLabel||'')===variantLabel);
   if (existing) existing.qty += qty;
-  else state.cart.items.push({ id:p.id, name:p.name, unit:p.unit, qty, price_cash:p.price_cash, price_crypto:p.price_crypto });
+  else state.cart.items.push({
+    id: p.id,
+    name: p.name,
+    unit: hasVariants ? '' : p.unit,
+    variantLabel,
+    qty,
+    price_cash,
+    price_crypto
+  });
   persistCart();
   renderCartItems();
 }
-
 function persistCart(){ localStorage.setItem('cart', JSON.stringify(state.cart)); }
 
 function sumCart() {
@@ -153,10 +219,12 @@ function renderCartItems() {
   const root = document.getElementById('cartItems');
   root.innerHTML = '';
   state.cart.items.forEach(it=>{
+    const label = it.variantLabel ? ` (${it.variantLabel})` : (it.unit ? ` (${it.unit})` : '');
     const row = document.createElement('div'); row.className='row cart-item';
-    row.innerHTML = `<div class="cart-text">${it.name} x ${it.qty} (${it.unit||'1u'}) — Prix cash : ${fmtEUR(it.price_cash)} / Prix crypto : ${fmtEUR(it.price_crypto)}</div>`;
+    row.innerHTML = `<div class="cart-text">${it.name}${label} x ${it.qty} — Prix cash : ${fmtEUR(it.price_cash)} / Prix crypto : ${fmtEUR(it.price_crypto)}</div>`;
     const del = document.createElement('button'); del.textContent='Supprimer'; del.onclick=()=>{
-      state.cart.items = state.cart.items.filter(x=>x.id!==it.id); persistCart(); renderCartItems();
+      state.cart.items = state.cart.items.filter(x=>!(x.id===it.id && String(x.variantLabel||'')===String(it.variantLabel||'')));
+      persistCart(); renderCartItems();
     };
     row.appendChild(del);
     root.appendChild(row);
@@ -168,7 +236,6 @@ function renderCartItems() {
   totalRow.innerHTML = `<div class="cart-text"><b>Total:</b> ${fmtEUR(totals.cash)} (cash) • ${fmtEUR(totals.crypto)} (crypto)</div>`;
   root.appendChild(totalRow);
 }
-
 function hookupCartModal() {
   const modal = document.getElementById('cartModal');
   const cartStep = document.getElementById('cartStep');
