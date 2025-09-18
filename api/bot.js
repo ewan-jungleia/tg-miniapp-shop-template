@@ -226,44 +226,8 @@ async function onCallbackQuery(cbq){
 
   // Produits
   if (data==='admin:prod_list'){
-  const products=(await kv.get('products'))||[];
-  if (!products.length){ await send('Aucun produit.', chatId, adminProductsKb()); return; }
-
-  const blocks = products.map(function(p){
-    var mediaCount = (Array.isArray(p && p.media) ? p.media.length : 0) || 0;
-    var tarifs = '';
-    if (Array.isArray(p.quantities) && p.quantities.length>0){
-      var lines = (p.quantities||[]).map(function(v){
-        var lb = String((v && v.label) || '');
-        var pc = Number((v && v.price_cash) || 0);
-        var pr = Number((v && v.price_crypto) || 0);
-        return '  - ' + lb + ': ' + pc + ' € / ' + pr + ' €';
-      }).join('
-');
-      tarifs = 'Tarifs:
-' + lines;
-    } else {
-      var unit = p.unit || '1u';
-      var pc2 = Number(p.price_cash||0);
-      var pr2 = Number(p.price_crypto||0);
-      tarifs = 'Tarif: ' + unit + ' — ' + pc2 + ' € / ' + pr2 + ' €';
-    }
-    return [
-      '• <b>' + String(p.name) + '</b> (' + String(p.id) + ')',
-      tarifs,
-      'Médias: ' + mediaCount,
-      'Desc: ' + (p.description||'-')
-    ].join('
-');
-  }).join('
-
-');
-
-  await send('<b>Produits actifs</b>
-
-' + blocks, chatId, adminProductsKb());
-  return;
-}
+    const products=(await kv.get('products'))||[];
+    if (!products.length){ await send('Aucun produit.', chatId, adminProductsKb()); return; }
     const blocks=products.map(p=>{
       const mediaCount=(p.media||[]).length;
       return `• <b>${p.name}</b> (${p.id})\n  Unité: ${p.unit||'-'} | Cash: ${p.price_cash} € | Crypto: ${p.price_crypto} €\n  Médias: ${mediaCount}\n  Desc: ${p.description||'-'}`;
