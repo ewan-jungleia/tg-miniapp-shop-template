@@ -226,8 +226,44 @@ async function onCallbackQuery(cbq){
 
   // Produits
   if (data==='admin:prod_list'){
-    const products=(await kv.get('products'))||[];
-    if (!products.length){ await send('Aucun produit.', chatId, adminProductsKb()); return; }
+  const products=(await kv.get('products'))||[];
+  if (!products.length){ await send('Aucun produit.', chatId, adminProductsKb()); return; }
+
+  const blocks = products.map(p=>{
+    const mediaCount=(p.media||[]).length;
+    let tarifs='';
+    if (Array.isArray(p.quantities) && p.quantities.length>0){
+      const lines=p.quantities.map(v=>{
+        const lb=String(v?.label||'');
+        const pc=Number(v?.price_cash||0);
+        const pr=Number(v?.price_crypto||0);
+        return '  - '+lb+': '+pc+' € / '+pr+' €';
+      }).join('
+');
+      tarifs = 'Tarifs:
+'+lines;
+    } else {
+      const unit=p.unit||'1u';
+      const pc=Number(p.price_cash||0);
+      const pr=Number(p.price_crypto||0);
+      tarifs = 'Tarif: '+unit+' — '+pc+' € / '+pr+' €';
+    }
+    return [
+      '• <b>'+String(p.name)+'</b> ('+String(p.id)+')',
+      tarifs,
+      'Médias: '+mediaCount,
+      'Desc: '+(p.description||'-')
+    ].join('
+');
+  }).join('
+
+');
+
+  await send(`<b>Produits actifs</b>
+
+${blocks}`, chatId, adminProductsKb());
+  return;
+}
     const blocks=products.map(p=>{
   const mediaCount=(p.media||[]).length;
   let tarifs;
