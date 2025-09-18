@@ -210,35 +210,28 @@ function mediaEl(m) {
   return null;
 }
 
+
 function addToCart(p, qty) {
-  const hasVariants = Array.isArray(p.quantities) && p.quantities.length>0;
-  let price_cash = Number(p.price_cash||0);
-  let price_crypto = Number(p.price_crypto||0);
-  let variantLabel = '';
-
-  if (hasVariants) {
-    const sel = document.querySelector(`select.variantSel[data-id="${p.id}"]`);
-    const idx = sel ? (parseInt(sel.value,10)||0) : 0;
-    const v = p.quantities[idx] || {label:'', price_cash:0, price_crypto:0};
-    price_cash = Number(v.price_cash||0);
-    price_crypto = Number(v.price_crypto||0);
-    variantLabel = String(v.label||'');
+  const existing = state.cart.items.find(x =>
+    x.id === p.id && String(x.variantLabel||'') === String(p.variantLabel||'')
+  );
+  if (existing) {
+    existing.qty += qty;
+  } else {
+    state.cart.items.push({
+      id: p.id,
+      name: p.name,
+      unit: p.unit,
+      variantLabel: p.variantLabel || '',
+      qty,
+      price_cash: p.price_cash,
+      price_crypto: p.price_crypto
+    });
   }
-
-  const existing = state.cart.items.find(x=>x.id===p.id && String(x.variantLabel||'')===variantLabel);
-  if (existing) existing.qty += qty;
-  else state.cart.items.push({
-    id: p.id,
-    name: p.name,
-    unit: hasVariants ? '' : p.unit,
-    variantLabel,
-    qty,
-    price_cash,
-    price_crypto
-  });
   persistCart();
   renderCartItems();
 }
+
 function persistCart(){ localStorage.setItem('cart', JSON.stringify(state.cart)); }
 
 function sumCart() {
