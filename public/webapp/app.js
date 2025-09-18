@@ -128,14 +128,7 @@ function renderCatalog() {
       <div class="row">${p.description || ''}</div>
       ${variantHtml}
       <div class="row">
-        <div class="qty">
-          <label>Qté${unitInfo}${hasVariants?' (x packs)':''}</label>
-          <div class="qtybox">
-            <button type="button" class="minus" data-id="${p.id}">−</button>
-            <input type="number" min="1" value="1" data-id="${p.id}" class="qtyInput">
-            <button type="button" class="plus" data-id="${p.id}">+</button>
-          </div>
-        </div>
+        ${!hasVariants ? `<div class="qty"><label>Qté${unitInfo}</label><div class="qtybox"><button type="button" class="minus" data-id="${p.id}">−</button><input type="number" min="1" value="1" data-id="${p.id}" class="qtyInput"><button type="button" class="plus" data-id="${p.id}">+</button></div></div>` : ''}
         ${priceBlock}
       </div>
       <button class="primary" data-add="${p.id}">Ajouter au panier</button>
