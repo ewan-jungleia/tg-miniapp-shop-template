@@ -104,7 +104,7 @@ module.exports = async (req, res) => {
 function formatOrderText(cart, delivery, payment, orderId, sum) {
   const d = delivery || {};
   const items = (cart?.items || []).map(it =>
-    `• ${it.name} x ${it.qty} (${it.unit}) — Cash: ${it.price_cash} / Crypto: ${it.price_crypto}`
+    `• ${it.name}${(it.variantLabel?(' ('+it.variantLabel+')'):(it.unit?(' ('+it.unit+')'):''))} x ${it.qty} — Cash: ${it.price_cash} / Crypto: ${it.price_crypto}`
   ).join('\n');
 
   const addr = [
