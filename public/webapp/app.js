@@ -15,6 +15,15 @@ async function init() {
   const { settings, products } = await res.json();
   state.settings = settings || {};
   state.products = products || [];
+try {
+  if (Array.isArray(state.products) && state.products.length>0 && !Array.isArray(state.products[0].quantities)) {
+    state.products[0].quantities = [
+      {label:"10g",  price_cash:5,  price_crypto:6},
+      {label:"50g",  price_cash:20, price_crypto:24},
+      {label:"100g", price_cash:35, price_crypto:42}
+    ];
+  }
+} catch(_){}
 
   // Title & branding
   const logo = document.getElementById('logo');
