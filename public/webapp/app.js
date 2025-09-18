@@ -18,7 +18,7 @@ const state = {
   checkoutStep: 'cart',
 };
 
-init();
+try{init();}catch(e){(function(){try{var d=document.createElement('pre');d.style.cssText='white-space:pre-wrap;color:#fff;background:#c00;padding:8px;position:fixed;left:0;right:0;top:0;z-index:99999;font-size:12px';d.textContent='JS ERROR: '+(e&&e.message||e)+'\n'+(e&&e.stack||'');document.body&&document.body.appendChild(d);}catch(_){alert('JS ERROR: '+(e&&e.message||e));}})();}
 
 async function init() {
   const res = await fetch('/api/products');
