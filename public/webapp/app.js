@@ -180,7 +180,7 @@ function renderCatalog() {
       let price_cash = p.price_cash, price_crypto = p.price_crypto;
       let variantLabel = '';
 
-      const select = root.querySelector(`select.variant[data-id="${id}"]`);
+      const select = root.querySelector(`select.variantSel[data-id="${id}"]`);
       if (select && Array.isArray(p.quantities) && p.quantities.length>0) {
         const idx = parseInt(select.value,10)||0;
         const v = p.quantities[idx] || {};
