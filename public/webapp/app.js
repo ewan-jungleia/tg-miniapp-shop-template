@@ -1,3 +1,13 @@
+(function(){try{
+window.addEventListener('error',function(e){
+  try{
+    var d=document.createElement('pre');
+    d.style.cssText='white-space:pre-wrap;color:#fff;background:#c00;padding:8px;position:fixed;left:0;right:0;top:0;z-index:99999;font-size:12px';
+    d.textContent='JS ERROR: '+(e.message||'')+' — '+(e.filename||'')+':'+(e.lineno||'');
+    document.body && document.body.appendChild(d);
+  }catch(_){}
+}, true);
+}catch(_){}})();
 const tg = window.Telegram?.WebApp;
 tg?.ready?.();
 
