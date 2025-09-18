@@ -170,13 +170,36 @@ function renderCatalog() {
   });
 
   // Ajouter au panier
+  
   root.querySelectorAll('button[data-add]').forEach(btn=>{
     btn.onclick = ()=>{
       const id = btn.getAttribute('data-add');
       const p = state.products.find(x=>x.id===id);
-      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
-      const qty = Math.max(1, parseInt(input.value,10) || 1);
-      addToCart(p, qty);
+
+      let qty = 1; // valeur par défaut
+      let price_cash = p.price_cash, price_crypto = p.price_crypto;
+      let variantLabel = '';
+
+      const select = root.querySelector(`select.variant[data-id="${id}"]`);
+      if (select && Array.isArray(p.quantities) && p.quantities.length>0) {
+        const idx = parseInt(select.value,10)||0;
+        const v = p.quantities[idx] || {};
+        variantLabel = v.label || '';
+        price_cash = v.price_cash || 0;
+        price_crypto = v.price_crypto || 0;
+      } else {
+        const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+        qty = Math.max(1, parseInt(input?.value,10) || 1);
+      }
+
+      addToCart({
+        id: p.id,
+        name: p.name,
+        unit: p.unit,
+        variantLabel,
+        price_cash,
+        price_crypto
+      }, qty);
       openCart('cart');
     };
   });
