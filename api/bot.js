@@ -229,9 +229,23 @@ async function onCallbackQuery(cbq){
     const products=(await kv.get('products'))||[];
     if (!products.length){ await send('Aucun produit.', chatId, adminProductsKb()); return; }
     const blocks=products.map(p=>{
-      const mediaCount=(p.media||[]).length;
-      return `• <b>${p.name}</b> (${p.id})\n  Unité: ${p.unit||'-'} | Cash: ${p.price_cash} € | Crypto: ${p.price_crypto} €\n  Médias: ${mediaCount}\n  Desc: ${p.description||'-'}`;
-    }).join('\n\n');
+  const mediaCount=(p.media||[]).length;
+  let tarifs;
+  if (Array.isArray(p.quantities) && p.quantities.length>0) {
+    const lines = p.quantities.map(v=>`    - ${v.label}: ${v.price_cash} € / ${v.price_crypto} €`).join('
+');
+    tarifs = `Tarifs:
+${lines}`;
+  } else {
+    tarifs = `Tarif: ${p.unit||'1u'} — ${p.price_cash} € / ${p.price_crypto} €`;
+  }
+  return `• <b>${p.name}</b> (${p.id})
+${tarifs}
+Médias: ${mediaCount}
+Desc: ${p.description||'-'}`;
+}).join('
+
+');
     await send(`<b>Produits actifs</b>\n\n${blocks}`, chatId, adminProductsKb()); return;
   }
   if (data==='admin:add_product'){
