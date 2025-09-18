@@ -147,7 +147,7 @@ function renderCatalog() {
   root.querySelectorAll('button.minus').forEach(b=>{
     b.onclick = ()=>{
       const id=b.getAttribute('data-id');
-      const input = root.querySelector(\`input.qtyInput[data-id="\${id}"]\`);
+      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
       const v = Math.max(1, (parseInt(input.value,10)||1) - 1);
       input.value = v;
     };
@@ -155,7 +155,7 @@ function renderCatalog() {
   root.querySelectorAll('button.plus').forEach(b=>{
     b.onclick = ()=>{
       const id=b.getAttribute('data-id');
-      const input = root.querySelector(\`input.qtyInput[data-id="\${id}"]\`);
+      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
       input.value = Math.max(1, (parseInt(input.value,10)||1) + 1);
     };
   });
@@ -181,7 +181,7 @@ function renderCatalog() {
     btn.onclick = ()=>{
       const id = btn.getAttribute('data-add');
       const p = state.products.find(x=>x.id===id);
-      const input = root.querySelector(\`input.qtyInput[data-id="\${id}"]\`);
+      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
       const qty = Math.max(1, parseInt(input.value,10) || 1);
       addToCart(p, qty);
       openCart('cart');
