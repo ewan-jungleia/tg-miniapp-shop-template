@@ -24,6 +24,22 @@ function prettyErr(e){
 }
 const { preview, apply, rollback, currentDataVersion } = require('./_patchEngine');
 const PATCH_SECRET = '';
+function parseQuantitiesDsl(dsl){
+  const out=[];
+  try{
+    const parts=String(dsl||'').split(';').map(x=>x.trim()).filter(Boolean);
+    for(const part of parts){
+      const sp=part.split('=');
+      if(sp.length<2) continue;
+      const label=sp[0];
+      const prices=sp.slice(1).join('=');
+      const pp=String(prices).split('/');
+      out.push({ label:String(label||'').trim(), price_cash:Number(pp[0]||0), price_crypto:Number(pp[1]||0) });
+    }
+  }catch(_){}
+  return out;
+}
+
 const BOT = () => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
@@ -414,6 +430,60 @@ async function onCallbackQuery(cbq){
 /** ===== Messages ===== **/
 
 async function onMessage(msg){
+/*__QUANT_CMDS__*/
+  try{
+    const chatId = msg && msg.chat ? msg.chat.id : null;
+    const fromId = msg && msg.from ? msg.from.id : null;
+    const text = String((msg && msg.text) || '').trim();
+    let settings = await kv.get('settings') || {};
+    const isAdminUser = Array.isArray(settings.admins) && settings.admins.map(String).includes(String(fromId));
+
+    if (isAdminUser && text.startsWith('/setquant ')) {
+      const body = text.slice(9).trim();
+      const sp = body.split(' ').filter(Boolean);
+      if (sp.length >= 2) {
+        const key = sp[0].trim();
+        const dsl = body.slice(key.length).trim();
+        const quan = parseQuantitiesDsl(dsl);
+        const products = (await kv.get('products')) || [];
+        const idx = products.findIndex(p =>
+          String(p.id||'').toLowerCase()===key.toLowerCase() ||
+          String(p.name||'').toLowerCase()===key.toLowerCase()
+        );
+        if (idx>=0) {
+          products[idx].quantities = quan;
+          await kv.set('products', products);
+          await BOT().post('/sendMessage',{ chat_id: chatId, text: 'OK: '+String(products[idx].name||products[idx].id)+'\n'+JSON.stringify(quan,null,2) });
+        } else {
+          await BOT().post('/sendMessage',{ chat_id: chatId, text: 'Produit introuvable: '+key });
+        }
+      } else {
+        await BOT().post('/sendMessage',{ chat_id: chatId, text: 'Usage: /setquant <id-ou-nom> 10g=5/6;50g=20/24' });
+      }
+      return;
+    }
+
+    if (isAdminUser && text==='/listprod') {
+      const products=(await kv.get('products'))||[];
+      if (!products.length){
+        await BOT().post('/sendMessage',{ chat_id: chatId, text: 'Aucun produit.' });
+        return;
+      }
+      const lines = products.map(p=>{
+        const medias = Array.isArray(p.media)?p.media.length:0;
+        if (Array.isArray(p.quantities) && p.quantities.length>0){
+          const q = p.quantities.map(v=>'  - '+String(v.label||'')+': '+Number(v.price_cash||0)+' € / '+Number(v.price_crypto||0)+' €').join('\n');
+          return '• '+p.name+' ('+p.id+')\nTarifs:\n'+q+'\nMédias: '+medias+'\nDesc: '+(p.description||'-');
+        } else {
+          const unit = p.unit||'1u';
+          const pc = Number(p.price_cash||0), pr = Number(p.price_crypto||0);
+          return '• '+p.name+' ('+p.id+')\nTarif: '+unit+' — '+pc+' € / '+pr+' €\nMédias: '+medias+'\nDesc: '+(p.description||'-');
+        }
+      }).join('\n\n');
+      await BOT().post('/sendMessage',{ chat_id: chatId, text: 'Produits:\n\n'+lines });
+      return;
+    }
+  }catch(_){}
 // ---- DIAG DOC ----
   try {
     console.log('[BOT] onMessage keys=', Object.keys(msg||{}));
