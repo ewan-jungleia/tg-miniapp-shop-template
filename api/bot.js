@@ -223,17 +223,44 @@ async function onCallbackQuery(cbq){
     }
     return;
   }
-
-  // Produits
+// Produits
   if (data==='admin:prod_list'){
-    const products=(await kv.get('products'))||[];
-    if (!products.length){ await send('Aucun produit.', chatId, adminProductsKb()); return; }
-    const blocks=products.map(p=>{
-      const mediaCount=(p.media||[]).length;
-      return `• <b>${p.name}</b> (${p.id})\n  Unité: ${p.unit||'-'} | Cash: ${p.price_cash} € | Crypto: ${p.price_crypto} €\n  Médias: ${mediaCount}\n  Desc: ${p.description||'-'}`;
-    }).join('\n\n');
-    await send(`<b>Produits actifs</b>\n\n${blocks}`, chatId, adminProductsKb()); return;
+    const products = (await kv.get('products')) || [];
+    if (!products.length){
+      await send('Produits actifs\n\n(aucun)', chatId, adminProductsKb());
+      return;
+    }
+
+    const lines = products.map(function(p){
+      const medias = Array.isArray(p && p.media) ? p.media.length : 0;
+
+      // Si variantes (quantities) existent, on les affiche proprement
+      if (Array.isArray(p.quantities) && p.quantities.length > 0){
+        const qs = (p.quantities || []).map(function(v){
+          const lb = String((v && v.label) || '');
+          const pc = Number((v && v.price_cash) || 0);
+          const pr = Number((v && v.price_crypto) || 0);
+          return '  - ' + lb + ': ' + pc + ' € / ' + pr + ' €';
+        }).join('\\n');
+        return '• ' + String(p.name) + ' (' + String(p.id) + ')\\n'
+             + 'Tarifs:\\n' + qs + '\\n'
+             + 'Médias: ' + medias + '\\n'
+             + 'Desc: ' + (p.description || '-');
+      }
+
+      // Sinon, ancien format (unité/prix)
+      const unit = p.unit || '1u';
+      const pc = Number(p.price_cash || 0), pr = Number(p.price_crypto || 0);
+      return '• ' + String(p.name) + ' (' + String(p.id) + ')\\n'
+           + 'Tarif: ' + unit + ' — ' + pc + ' € / ' + pr + ' €\\n'
+           + 'Médias: ' + medias + '\\n'
+           + 'Desc: ' + (p.description || '-');
+    }).join('\\n\\n');
+
+    await send('Produits actifs\\n\\n' + lines, chatId, adminProductsKb());
+    return;
   }
+
   if (data==='admin:add_product'){
     await adminSessionSet(userId,{ flow:'add_product', step:'name', payload:{ media:[] } });
     await send('Nom du produit ?', chatId); return;
@@ -673,18 +700,26 @@ function fmtDate(ts){
   }catch(_){ return new Date(ts||Date.now()).toISOString(); }
 }
 function orderLine(o){
-  const items=(o && o.cart && o.cart.items ? o.cart.items : []).map(i=>String(i.name)+' x '+String(i.qty)).join(', ') || '(vide)';
-  const d=o && o.delivery ? o.delivery : {};
+  const items = (o?.cart?.items||[]).map(it=>{
+    const name = String(it.name||'?');
+    const qty  = Number(it.qty||0);
+    const tag  = it.variantLabel ? ` (${it.variantLabel})` : (it.unit?` (${it.unit})`:'');
+    const pc   = Number(it.price_cash||0);
+    const pr   = Number(it.price_crypto||0);
+    return `${name}${tag} x ${qty} — Cash: ${pc} / Crypto: ${pr}`;
+  }).join(', ') || '(vide)';
+  const d=o?.delivery||{};
   const name=[d.firstname||'', d.lastname||''].filter(Boolean).join(' ').trim();
   const addr=[d.address1||'', [d.postalCode||'', d.city||''].filter(Boolean).join(' '), d.country||''].filter(Boolean).join(', ') || '-';
   return [
-    '<b>'+o.id+'</b> • '+fmtDate(o.ts),
-    'Produits: '+items,
-    'Paiement: '+(o.payment||'-'),
-    'Total: '+fmtEUR((o.totals&&o.totals.cash)||0)+' (cash) • '+fmtEUR((o.totals&&o.totals.crypto)||0)+' (crypto)',
-    'Adresse: '+(name?name+', ':'')+addr
-  ].join('\n');
+    `${o.id} • ${fmtDate(o.ts)}`,
+    `Produits: ${items}`,
+    `Paiement: ${o.payment||'-'}`,
+    `Total: ${fmtEUR(o?.totals?.cash||0)} (cash) • ${fmtEUR(o?.totals?.crypto||0)} (crypto)`,
+    `Adresse: ${name?(name+', '):''}${addr}`
+  ].join('\\n');
 }
+
 function aggregate(list){let cash=0, crypto=0, count=0;for(let i=0;i<list.length;i++){const o=list[i];if(!o) continue;count++;if(o.payment==="cash"){cash+=Number(o?.totals?.cash||0);}else if(o.payment==="crypto"){crypto+=Number(o?.totals?.crypto||0);}}return {cash,crypto,count};}
 async function handleReports(chatId, kind){
   const labels = {today:'Aujourd’hui', week:'Semaine', month:'Mois', year:'Année'};
