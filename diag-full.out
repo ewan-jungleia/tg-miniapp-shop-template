@@ -1,0 +1,1264 @@
+=== FULL DIAG Ven 19 sep 2025 13:48:43 UTC UTC ===
+## PWD
+/Users/ewanlanglais/dev/tg-miniapp-shop-tmp
+## BRANCH
+main
+## COMMITS
+c3173e7 deploy: admin variants pass1
+60e74eb feat: /setquant and /listprod; order recap shows variant label
+f1d0f39 revert(bot): restore from stable-v1.1.6 (undo broken admin list)
+82120f1 admin(list): afficher variantes (quantities) proprement
+166330d chore: trigger redeploy (force rebuild)
+
+## api/bot.js (FULL)
+     1	// api/bot.js
+     2	const axios = require('axios');
+     3	const { kv } = require('@vercel/kv');
+     4	// --- admin session (KV) ---
+     5	const ADMIN_SESS_PREFIX = 'admin:sess:';
+     6	async function adminSessionGet(uid){ try{ return (await kv.get(ADMIN_SESS_PREFIX+uid)) || null; }catch(_){ return null; } }
+     7	async function adminSessionSet(uid, obj){ try{ await kv.set(ADMIN_SESS_PREFIX+uid, obj); }catch(_){ } }
+     8	async function adminSessionClear(uid){ try{ await kv.del(ADMIN_SESS_PREFIX+uid); }catch(_){ } }
+     9	
+    10	
+    11	
+    12	
+    13	function prettyErr(e){
+    14	  try{
+    15	    if (e && e.response){
+    16	      const status = e.response.status;
+    17	      let payload = e.response.data;
+    18	      if (typeof payload !== 'string') payload = JSON.stringify(payload);
+    19	      if (payload && payload.length > 1200) payload = payload.slice(0,1200) + '…';
+    20	      return 'HTTP '+status+' — '+payload;
+    21	    }
+    22	    return String(e && e.message || e);
+    23	  }catch(_){ return String(e); }
+    24	}
+    25	const { preview, apply, rollback, currentDataVersion } = require('./_patchEngine');
+    26	const PATCH_SECRET = '';
+    27	function parseQuantitiesDsl(dsl){
+    28	  const out=[];
+    29	  try{
+    30	    const parts=String(dsl||'').split(';').map(x=>x.trim()).filter(Boolean);
+    31	    for(const part of parts){
+    32	      const sp=part.split('=');
+    33	      if(sp.length<2) continue;
+    34	      const label=sp[0];
+    35	      const prices=sp.slice(1).join('=');
+    36	      const pp=String(prices).split('/');
+    37	      out.push({ label:String(label||'').trim(), price_cash:Number(pp[0]||0), price_crypto:Number(pp[1]||0) });
+    38	    }
+    39	  }catch(_){}
+    40	  return out;
+    41	}
+    42	
+    43	const BOT = () => {
+    44	  const token = process.env.TELEGRAM_BOT_TOKEN;
+    45	  return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
+    46	};
+    47	
+    48	module.exports = async (req, res) => {
+    49	  try {
+    50	    if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed'); }
+    51	    const secretHeader = req.headers['x-telegram-bot-api-secret-token'];
+    52	    if (process.env.TELEGRAM_WEBHOOK_SECRET && secretHeader && secretHeader !== process.env.TELEGRAM_WEBHOOK_SECRET) {
+    53	      res.statusCode = 401; return res.end('Unauthorized');
+    54	    }
+    55	    const update = await readJson(req);
+    56	    try { const t = update.callback_query?'callback_query':(update.message?'message':'?'); console.log('[BOT] update type=', t, 'keys=', Object.keys(update||{})); } catch(_){}
+    57	    if (update.callback_query) {
+    58	      await onCallbackQuery(update.callback_query);
+    59	    } else if (update.message) {
+    60	      await onMessage(update.message);
+    61	    }
+    62	    res.statusCode = 200; res.end('OK');
+    63	  } catch { res.statusCode = 200; res.end('OK'); }
+    64	};
+    65	
+    66	async function readJson(req) {
+    67	  return new Promise((resolve) => {
+    68	    let data=''; req.on('data',c=>data+=c); req.on('end',()=>{ try{resolve(JSON.parse(data||'{}'))}catch{resolve({})} });
+    69	  });
+    70	}
+    71	function isAdmin(userId, settings) { const list=settings?.admins||[]; return list.includes(String(userId)); }
+    72	async function send(text, chat_id, inlineKb, plain=false){
+    73	  return BOT().post('/sendMessage',{ chat_id, text, reply_markup: inlineKb ? { inline_keyboard: inlineKb } : undefined });
+    74	}
+    75	function userHomeKb(){
+    76	  const webappUrl=process.env.WEBAPP_URL;
+    77	  return { keyboard:[ [{text:'Description'},{text:'FAQ'}], [{text:'Menu', web_app:{url:webappUrl}}] ], resize_keyboard:true };
+    78	}
+    79	async function sendHome(chatId){
+    80	  await BOT().post('/sendMessage',{ chat_id:chatId, text:'Bienvenue ! Choisis une option :', reply_markup: userHomeKb() });
+    81	}
+    82	async function getFileUrl(fileId){
+    83	  const r=await BOT().get('/getFile',{ params:{ file_id:fileId }});
+    84	  const path=r.data?.result?.file_path; const token=process.env.TELEGRAM_BOT_TOKEN;
+    85	  if (!path) return null; return `https://api.telegram.org/file/bot${token}/${path}`;
+    86	}
+    87	
+    88	/** ===== Menus Admin ===== **/
+    89	function adminRootKb(){
+    90	  return [
+    91	    [{ text:'🛒 Produits', callback_data:'admin:cat_products' }],
+    92	    [{ text:'📝 Textes', callback_data:'admin:cat_texts' }],
+    93	    [{ text:'🎨 Branding', callback_data:'admin:cat_branding' }],
+    94	    [{ text:'🔐 Accès', callback_data:'admin:cat_access' }],
+    95	    [{ text:'📦 Formulaire', callback_data:'admin:cat_form' }],
+    96	    [{ text:'📞 Contact', callback_data:'admin:cat_contact' }],
+    97	    [{ text:'👑 Admins', callback_data:'admin:cat_admins' }],
+    98	    [{ text:'📈 Rapports', callback_data:'admin:cat_reports' }],
+    99	    [{ text:'🧩 Patchs', callback_data:'admin:cat_patches' }]
+   100	  ];
+   101	}
+   102	
+   103	function adminProductsKb(){
+   104	  return [
+   105	    [{ text:'📋 Lister', callback_data:'admin:prod_list' }],
+   106	    [{ text:'➕ Ajouter', callback_data:'admin:add_product' }],
+   107	    [{ text:'✏️ Modifier', callback_data:'admin:edit_product' }],
+   108	    [{ text:'🗑️ Supprimer', callback_data:'admin:delete_product' }],
+   109	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   110	  ];
+   111	}
+   112	function adminTextsKb(){
+   113	  return [
+   114	    [{ text:'✏️ Description', callback_data:'admin:set_description' }],
+   115	    [{ text:'✏️ FAQ', callback_data:'admin:set_faq' }],
+   116	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   117	  ];
+   118	}
+   119	function adminBrandingKb(){
+   120	  return [
+   121	    [{ text:'🖼️ Logo', callback_data:'admin:set_logo' }, { text:'🖼️ Fond', callback_data:'admin:set_bg' }],
+   122	    [{ text:'♻️ Revenir au fond par défaut', callback_data:'admin:reset_bg' }],
+   123	    [{ text:'🏷️ Nom boutique', callback_data:'admin:set_name' }],
+   124	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   125	  ];
+   126	}
+   127	function adminAccessKb(){
+   128	  return [
+   129	    [{ text:'Rendre PUBLIC', callback_data:'admin:set_access:public' }],
+   130	    [{ text:'Rendre PRIVÉ', callback_data:'admin:set_access:private' }],
+   131	    [{ text:'Canaux privés (ajouter/supprimer)', callback_data:'admin:channels_manage' }],
+   132	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   133	  ];
+   134	}
+   135	function adminFormKb(fields){
+   136	  const f=fields||{};
+   137	  return [
+   138	    [{ text:`Prénom: ${f.firstname?'✅':'❌'}`, callback_data:'admin:form_toggle:firstname' }, { text:`Nom: ${f.lastname?'✅':'❌'}`, callback_data:'admin:form_toggle:lastname' }],
+   139	    [{ text:`Adresse: ${f.address1?'✅':'❌'}`, callback_data:'admin:form_toggle:address1' }],
+   140	    [{ text:`CP: ${f.postalCode?'✅':'❌'}`, callback_data:'admin:form_toggle:postalCode' }, { text:`Ville: ${f.city?'✅':'❌'}`, callback_data:'admin:form_toggle:city' }],
+   141	    [{ text:`Pays: ${f.country?'✅':'❌'}`, callback_data:'admin:form_toggle:country' }],
+   142	    [{ text:'🔁 Réinitialiser', callback_data:'admin:form_reset' }],
+   143	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   144	  ];
+   145	}
+   146	function adminContactKb(){
+   147	  return [
+   148	    [{ text:'✏️ Contact Telegram', callback_data:'admin:set_contact' }],
+   149	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   150	  ];
+   151	}
+   152	function adminAdminsKb(){
+   153	  return [
+   154	    [{ text:'📋 Lister', callback_data:'admin:admins_list' }],
+   155	    [{ text:'➕ Ajouter', callback_data:'admin:admin_add' }, { text:'🗑️ Retirer', callback_data:'admin:admin_remove' }],
+   156	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   157	  ];
+   158	}
+   159	function kbConfirm(extra=[]) {
+   160	  return [[
+   161	    { text:'✅ Valider', callback_data:'ok' },
+   162	    { text:'🔄 Revenir', callback_data:'back' },
+   163	    { text:'✖️ Annuler', callback_data:'cancel' },
+   164	    ...extra
+   165	  ]];
+   166	}
+   167	function kbMedia(){
+   168	  return [[
+   169	    { text:'➕ Ajouter d’autres médias', callback_data:'more_media' },
+   170	    { text:'🧹 Vider médias', callback_data:'clear_media' },
+   171	    { text:'➡️ Terminer', callback_data:'finish_media' }
+   172	  ],[
+   173	    { text:'✖️ Annuler', callback_data:'cancel' }
+   174	  ]];
+   175	}
+   176	
+   177	/** ===== Callbacks ===== **/
+   178	async function onCallbackQuery(cbq){
+   179	  const chatId=cbq.message?.chat?.id; const userId=cbq.from?.id; const data=cbq.data||'';
+   180	  try { await BOT().post('/answerCallbackQuery',{ callback_query_id: cbq.id }); } catch (_) {}
+   181	  let settings=await kv.get('settings');
+   182	  if (!settings){ settings={admins:[String(userId)]}; await kv.set('settings', settings); }
+   183	  if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId, null, true); return; }
+   184	
+   185	  // Root & catégories
+   186	  if (data==='admin:root'){ await send('Panneau admin :', chatId, adminRootKb()); return; }
+   187	  if (data==='admin:cat_products'){ await send('Produits :', chatId, adminProductsKb()); return; }
+   188	  if (data==='admin:cat_texts'){ await send('Textes :', chatId, adminTextsKb()); return; }
+   189	  if (data==='admin:cat_branding'){ await send('Branding :', chatId, adminBrandingKb()); return; }
+   190	  if (data==='admin:cat_access'){ await send('Accès :', chatId, adminAccessKb()); return; }
+   191	  if (data==='admin:cat_form'){
+   192	    const fields = (settings.deliveryForm?.fields) || {};
+   193	    await send('Formulaire de livraison (activer/désactiver champs) :', chatId, adminFormKb(fields)); return;
+   194	  }
+   195	  if (data==='admin:cat_contact'){ await send('Contact :', chatId, adminContactKb()); return; }
+   196	  if (data==='admin:cat_admins'){ await send('Admins :', chatId, adminAdminsKb()); return; }
+   197	
+   198	  if (data==='admin:cat_patches'){
+   199	    const sess = await adminSessionGet(userId);
+   200	    const showUp = !!(sess && sess.flow==='patch' && sess.step==='applied');
+   201	    await send('🧩 Patchs :', chatId, adminPatchesKb(showUp));
+   202	    return;
+   203	  }
+   204	  if (data==='admin:version'){ await handleVersion(chatId); return; }
+   205	  if (data==='admin:patch_wait'){
+   206	    await adminSessionSet(userId,{ flow:'patch', step:'wait_doc' });
+   207	    await send('Envoie le fichier JSON du patch (comme *Document*).', chatId, adminPatchesKb(false));
+   208	    return;
+   209	  }
+   210	  if (data==='admin:patch_history'){
+   211	    try{
+   212	      const hist = (await kv.get('patch:history')) || [];
+   213	      if (!hist.length){ await send('Aucun patch appliqué pour le moment.', chatId, adminPatchesKb(false)); return; }
+   214	      const lines = hist.slice(-10).map(h=>`• ${h.at||'-'} : ${h.from||'?'} → ${h.to||'?'} ${h.rollback?'(rollback)':''}`).join('\n');
+   215	      await send(`<b>Derniers patchs</b>\n${lines}`, chatId, adminPatchesKb(true));
+   216	    }catch(e){ await send('Erreur historique: '+(e&&e.message||e), chatId); }
+   217	    return;
+   218	  }
+   219	
+   220	
+   221	  if (data==='admin:cat_patches'){ await send('🧩 Patchs :', chatId, adminPatchesKb()); return; }
+   222	  if (data==='admin:version'){ await handleVersion(chatId); return; }
+   223	  if (data==='admin:upgrade'){ await handleUpgrade(chatId, userId); return; }
+   224	  if (data==='admin:patch_wait'){
+   225	    await adminSessionSet(userId,{ flow:'patch', step:'wait_doc' });
+   226	    await send('Envoie maintenant le fichier JSON du patch (comme *Document*).', chatId, adminPatchesKb());
+   227	    return;
+   228	  }
+   229	
+   230	
+   231	  // Rapports (menu + boutons)
+   232	  if (data==='admin:cat_reports'){ await send('📈 Rapports — choisis une période :', chatId, adminReportsKb()); return; }
+   233	  if (data.startsWith('admin:reports:range:')){
+   234	    try {
+   235	      const kind = data.split(':').pop();
+   236	      await handleReports(chatId, kind);
+   237	    } catch (e) {
+   238	      await send('Erreur rapports: ' + String(e && e.message || e), chatId);
+   239	    }
+   240	    return;
+   241	  }
+   242	
+   243	  // Produits
+   244	  if (data==='admin:prod_list'){
+   245	    const products=(await kv.get('products'))||[];
+   246	    if (!products.length){ await send('Aucun produit.', chatId, adminProductsKb()); return; }
+   247	    const blocks=products.map(p=>{
+   248	      const mediaCount=(p.media||[]).length;
+   249	      return `• <b>${p.name}</b> (${p.id})\n  Unité: ${p.unit||'-'} | Cash: ${p.price_cash} € | Crypto: ${p.price_crypto} €\n  Médias: ${mediaCount}\n  Desc: ${p.description||'-'}`;
+   250	    }).join('\n\n');
+   251	    await send(`<b>Produits actifs</b>\n\n${blocks}`, chatId, adminProductsKb()); return;
+   252	  }
+   253	  if (data==='admin:add_product'){
+   254	    await adminSessionSet(userId,{ flow:'add_product', step:'name', payload:{ media:[] } });
+   255	    await send('Nom du produit ?', chatId); return;
+   256	  }
+   257	  if (data==='admin:edit_product'){
+   258	    await adminSessionSet(userId,{ flow:'edit_product', step:'ask_id' });
+   259	    await send('ID ou nom du produit à modifier ?', chatId); return;
+   260	  }
+   261	  if (data.startsWith('admin:edit_field:')){
+   262	    const field = data.split(':')[2];
+   263	    const sess=await adminSessionGet(userId);
+   264	    if (!sess || sess.flow!=='edit_product' || !sess.payload?.id) return;
+   265	    if (field==='media'){
+   266	      sess.step='media'; sess.payload.newMedia=[]; await adminSessionSet(userId, sess);
+   267	      await send('Envoie des <b>photos/vidéos</b>.\nTu peux vider d’abord les médias existants avec 🧹 puis ajouter.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia());
+   268	    } else {
+   269	      sess.step='field_val'; sess.payload.field=field; await adminSessionSet(userId, sess);
+   270	      const labelMap={name:'Nom',description:'Description',unit:'Unité',price_cash:'Prix cash (€)',price_crypto:'Prix crypto (€)'};
+   271	      await send(`${labelMap[field]||field} ?`, chatId, kbConfirm());
+   272	    }
+   273	    return;
+   274	  }
+   275	
+   276	  // Supprimer un produit
+   277	  if (data==='admin:delete_product'){
+   278	    await adminSessionSet(userId,{ flow:'delete_product', step:'ask', payload:{} });
+   279	    await send('ID ou nom du produit à supprimer ?', chatId); return;
+   280	  }
+   281	
+   282	  // Textes
+   283	  if (data==='admin:set_description'){
+   284	    await adminSessionSet(userId,{ flow:'set_description', step:'text' });
+   285	    await send('Envoie la <b>Description</b> complète.', chatId); return;
+   286	  }
+   287	  if (data==='admin:set_faq'){
+   288	    await adminSessionSet(userId,{ flow:'set_faq', step:'text' });
+   289	    await send('Envoie la <b>FAQ</b> complète.', chatId); return;
+   290	  }
+   291	
+   292	  // Branding
+   293	  if (data==='admin:set_logo'){
+   294	    await adminSessionSet(userId,{ flow:'set_logo', step:'wait_media' });
+   295	    await send('Envoie une <b>photo</b> pour le logo.', chatId); return;
+   296	  }
+   297	  if (data==='admin:set_bg'){
+   298	    await adminSessionSet(userId,{ flow:'set_bg', step:'wait_media' });
+   299	    await send('Envoie une <b>photo</b> pour le fond d’écran.', chatId); return;
+   300	  }
+   301	  if (data==='admin:reset_bg'){
+   302	    const s=(await kv.get('settings'))||{}; delete s.bgUrl; await kv.set('settings', s);
+   303	    await send('✅ Fond d’écran réinitialisé (valeur par défaut).', chatId, adminBrandingKb()); return;
+   304	  }
+   305	  if (data==='admin:set_name'){
+   306	    await adminSessionSet(userId,{ flow:'set_name', step:'ask' });
+   307	    await send('Nom de la boutique ?', chatId); return;
+   308	  }
+   309	
+   310	  // Accès (public/privé + canaux)
+   311	  if (data==='admin:set_access:public' || data==='admin:set_access:private'){
+   312	    settings.privateMode = data.endsWith(':private');
+   313	    await kv.set('settings', settings);
+   314	    await send(`Mode d'accès défini: <b>${settings.privateMode ? 'Privé' : 'Public'}</b>`, chatId, adminAccessKb()); return;
+   315	  }
+   316	  if (data==='admin:channels_manage'){
+   317	    await adminSessionSet(userId,{ flow:'channels', step:'menu' });
+   318	    const list = (settings.channels||[]).join('\n• ');
+   319	    await send(`Canaux privés:\n${list? '• '+list : '(aucun)'}\n\nEnvoyer @canal pour ajouter, ou "supprimer @canal" pour retirer.`, chatId); return;
+   320	  }
+   321	
+   322	  // Formulaire (toggle champs)
+   323	  if (data.startsWith('admin:form_toggle:')){
+   324	    const key = data.split(':').pop();
+   325	    settings.deliveryForm = settings.deliveryForm || { fields:{} };
+   326	    settings.deliveryForm.fields = settings.deliveryForm.fields || {};
+   327	    settings.deliveryForm.fields[key] = !settings.deliveryForm.fields[key];
+   328	    await kv.set('settings', settings);
+   329	    await send('Formulaire mis à jour :', chatId, adminFormKb(settings.deliveryForm.fields)); return;
+   330	  }
+   331	  if (data==='admin:form_reset'){
+   332	    settings.deliveryForm = { fields: { firstname:true, lastname:true, address1:true, postalCode:true, city:true, country:true } };
+   333	    await kv.set('settings', settings);
+   334	    await send('✅ Formulaire réinitialisé.', chatId, adminFormKb(settings.deliveryForm.fields)); return;
+   335	  }
+   336	
+   337	  // Contact
+   338	  if (data==='admin:set_contact'){
+   339	    await adminSessionSet(userId,{ flow:'set_contact', step:'ask' });
+   340	    await send('Envoie le @username du contact (sans lien).', chatId); return;
+   341	  }
+   342	
+   343	  // Admins
+   344	  if (data==='admin:admins_list'){
+   345	    const admins = (settings.admins||[]).map(id=>`• ${id}`).join('\n') || '(aucun)';
+   346	    await send(`<b>Admins</b>\n${admins}`, chatId, adminAdminsKb()); return;
+   347	  }
+   348	  if (data==='admin:admin_add'){
+   349	    await adminSessionSet(userId,{ flow:'admins', step:'add' });
+   350	    await send('Envoie l’ID numérique Telegram de l’admin à ajouter.', chatId); return;
+   351	  }
+   352	  if (data==='admin:admin_remove'){
+   353	    await adminSessionSet(userId,{ flow:'admins', step:'remove' });
+   354	    await send('Envoie l’ID numérique Telegram de l’admin à retirer.', chatId); return;
+   355	  }
+   356	
+   357	  // Media helpers
+   358	  const sess=await adminSessionGet(userId);
+   359	  if (data==='more_media'){
+   360	    if (sess && (sess.flow==='add_product' || (sess.flow==='edit_product' && sess.step==='media'))) {
+   361	      await adminSessionSet(userId, {...sess, step:'media'});
+   362	      await send('Envoie d’autres <b>photos/vidéos</b>.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia());
+   363	    }
+   364	    return;
+   365	  }
+   366	  if (data==='clear_media'){
+   367	    if (sess?.flow==='edit_product' && sess.step==='media'){
+   368	      sess.payload.clearFirst = true;
+   369	      sess.payload.newMedia = [];
+   370	      await adminSessionSet(userId, sess);
+   371	      await send('🧹 Médias existants seront vidés. Ajoute maintenant les nouveaux, puis ➡️ Terminer.', chatId, kbMedia());
+   372	    }
+   373	    return;
+   374	  }
+   375	  if (data==='finish_media'){
+   376	    if (sess?.flow==='add_product'){
+   377	      const p=sess.payload;
+   378	      const recap=[
+   379	        `• Nom: ${p.name}`,
+   380	        `• Desc: ${p.description}`,
+   381	        `• Unité: ${p.unit}`,
+   382	        `• Cash: ${p.price_cash} € | Crypto: ${p.price_crypto} €`,
+   383	        `• Médias: ${p.media?.length||0}`
+   384	      ].join('\n');
+   385	      await adminSessionSet(userId, {...sess, step:'confirm'});
+   386	      await send(`<b>Récap</b>\n${recap}`, chatId, kbConfirm());
+   387	    } else if (sess?.flow==='edit_product' && sess.step==='media'){
+   388	      const products=(await kv.get('products'))||[];
+   389	      const idx=products.findIndex(p=>p.id===sess.payload.id);
+   390	      if (idx<0){ await send('Produit introuvable.', chatId); return; }
+   391	      if (sess.payload.clearFirst) products[idx].media = [];
+   392	      products[idx].media = products[idx].media || [];
+   393	      products[idx].media.push(...(sess.payload.newMedia||[]));
+   394	      await kv.set('products', products);
+   395	      await adminSessionClear(userId);
+   396	      await send('✅ Médias du produit mis à jour.', chatId, adminProductsKb());
+   397	    }
+   398	    return;
+   399	  }
+   400	
+   401	  // Confirmations génériques
+   402	  if (data==='ok'){
+   403	    if (sess?.flow==='add_product' && sess.step==='confirm'){
+   404	      const products=(await kv.get('products'))||[];
+   405	      const p=sess.payload; p.id=p.id||('p'+Math.random().toString(36).slice(2,8)); p.media=p.media||[];
+   406	      products.push(p); await kv.set('products', products);
+   407	      await adminSessionClear(userId);
+   408	      await send('✅ Produit ajouté.', chatId, adminProductsKb()); return;
+   409	    }
+   410	    if (sess?.flow==='delete_product' && sess.step==='confirm'){
+   411	      let products=(await kv.get('products'))||[]; const before=products.length;
+   412	      products=products.filter(x=>x.id!==sess.payload.id); await kv.set('products', products);
+   413	      await adminSessionClear(userId);
+   414	      await send(before===products.length?'Aucun produit supprimé.':'✅ Produit supprimé.', chatId, adminProductsKb()); return;
+   415	    }
+   416	  }
+   417	  if (data==='back'){
+   418	    if (sess?.flow==='add_product'){
+   419	      if (sess.step==='confirm'){ await adminSessionSet(userId,{...sess, step:'crypto'}); await send('Prix crypto (€) ?', chatId); }
+   420	      else if (sess.step==='crypto'){ await adminSessionSet(userId,{...sess, step:'price'}); await send('Prix cash (€) ?', chatId); }
+   421	      else if (sess.step==='price'){ await adminSessionSet(userId,{...sess, step:'unit'}); await send('Unité (ex: 1u = 100g) ?', chatId); }
+   422	      else if (sess.step==='unit'){ await adminSessionSet(userId,{...sess, step:'desc'}); await send('Description ?', chatId); }
+   423	      else if (sess.step==='desc'){ await adminSessionSet(userId,{...sess, step:'name'}); await send('Nom du produit ?', chatId); }
+   424	      return;
+   425	    }
+   426	  }
+   427	  if (data==='cancel'){ await adminSessionClear(userId); await send('✖️ Flow annulé.', chatId, adminRootKb()); return; }
+   428	}
+   429	
+   430	/** ===== Messages ===== **/
+   431	
+   432	async function onMessage(msg){
+   433	/*__QUANT_CMDS__*/
+   434	  try{
+   435	    const chatId = msg && msg.chat ? msg.chat.id : null;
+   436	    const fromId = msg && msg.from ? msg.from.id : null;
+   437	    const text = String((msg && msg.text) || '').trim();
+   438	    let settings = await kv.get('settings') || {};
+   439	    const isAdminUser = Array.isArray(settings.admins) && settings.admins.map(String).includes(String(fromId));
+   440	
+   441	    if (isAdminUser && text.startsWith('/setquant ')) {
+   442	      const body = text.slice(9).trim();
+   443	      const sp = body.split(' ').filter(Boolean);
+   444	      if (sp.length >= 2) {
+   445	        const key = sp[0].trim();
+   446	        const dsl = body.slice(key.length).trim();
+   447	        const quan = parseQuantitiesDsl(dsl);
+   448	        const products = (await kv.get('products')) || [];
+   449	        const idx = products.findIndex(p =>
+   450	          String(p.id||'').toLowerCase()===key.toLowerCase() ||
+   451	          String(p.name||'').toLowerCase()===key.toLowerCase()
+   452	        );
+   453	        if (idx>=0) {
+   454	          products[idx].quantities = quan;
+   455	          await kv.set('products', products);
+   456	          await BOT().post('/sendMessage',{ chat_id: chatId, text: 'OK: '+String(products[idx].name||products[idx].id)+'\n'+JSON.stringify(quan,null,2) });
+   457	        } else {
+   458	          await BOT().post('/sendMessage',{ chat_id: chatId, text: 'Produit introuvable: '+key });
+   459	        }
+   460	      } else {
+   461	        await BOT().post('/sendMessage',{ chat_id: chatId, text: 'Usage: /setquant <id-ou-nom> 10g=5/6;50g=20/24' });
+   462	      }
+   463	      return;
+   464	    }
+   465	
+   466	    if (isAdminUser && text==='/listprod') {
+   467	      const products=(await kv.get('products'))||[];
+   468	      if (!products.length){
+   469	        await BOT().post('/sendMessage',{ chat_id: chatId, text: 'Aucun produit.' });
+   470	        return;
+   471	      }
+   472	      const lines = products.map(p=>{
+   473	        const medias = Array.isArray(p.media)?p.media.length:0;
+   474	        if (Array.isArray(p.quantities) && p.quantities.length>0){
+   475	          const q = p.quantities.map(v=>'  - '+String(v.label||'')+': '+Number(v.price_cash||0)+' € / '+Number(v.price_crypto||0)+' €').join('\n');
+   476	          return '• '+p.name+' ('+p.id+')\nTarifs:\n'+q+'\nMédias: '+medias+'\nDesc: '+(p.description||'-');
+   477	        } else {
+   478	          const unit = p.unit||'1u';
+   479	          const pc = Number(p.price_cash||0), pr = Number(p.price_crypto||0);
+   480	          return '• '+p.name+' ('+p.id+')\nTarif: '+unit+' — '+pc+' € / '+pr+' €\nMédias: '+medias+'\nDesc: '+(p.description||'-');
+   481	        }
+   482	      }).join('\n\n');
+   483	      await BOT().post('/sendMessage',{ chat_id: chatId, text: 'Produits:\n\n'+lines });
+   484	      return;
+   485	    }
+   486	  }catch(_){}
+   487	// ---- DIAG DOC ----
+   488	  try {
+   489	    console.log('[BOT] onMessage keys=', Object.keys(msg||{}));
+   490	    if (msg && msg.document) {
+   491	      const name = (msg.document.file_name||'inconnu');
+   492	      try { await send('📄 Doc reçu: '+name+' — traitement…', msg.chat.id); } catch(_){}
+   493	    }
+   494	  } catch(_){}
+   495	
+   496	  // Rattrapage: si un ADMIN envoie un document, on traite le patch directement
+   497	  try{
+   498	    if (msg && msg.document){
+   499	      const s = (await kv.get('settings')) || {};
+   500	      if (isAdmin(msg.from?.id, s)) { await handlePatchDocument(msg); return; }
+   501	    }
+   502	  }catch(_){/* ignore */}
+   503	  // --- Raccourcis commandes ---
+   504	  if (msg && msg.document && (msg.caption||"").trim()==="/patch") { await handlePatchDocument(msg); return; }
+   505	  if (msg && msg.text && msg.text.startsWith("/rollback ")) { const v=(msg.text||"").split(" ")[1]; await handleRollback(msg.chat.id, msg.from.id, v); return; }
+   506	  if (msg && msg.text && (msg.text||"").trim()==="/version") { await handleVersion(msg.chat.id); return; }
+   507	  if (msg && msg.text && (msg.text||"").trim()==="/upgrade") { await handleUpgrade(msg.chat.id, msg.from.id); return; }
+   508	
+   509	  // --- Mode 'Appliquer un patch' : accepte Document OU JSON en texte ---
+   510	  try{
+   511	    const __sessPatch = await adminSessionGet(msg.from.id);
+   512	    if (__sessPatch && __sessPatch.flow==='patch' && __sessPatch.step==='wait_doc'){
+   513	      if (msg.document){
+   514	        await handlePatchDocument(msg);
+   515	        await adminSessionClear(msg.from.id);
+   516	        return;
+   517	      }
+   518	      if (typeof msg.text==='string'){
+   519	        const t = msg.text.trim();
+   520	        if (t.startsWith('{') && t.endsWith('}')){
+   521	          try{
+   522	            const manifest = JSON.parse(t);
+   523	            const p = await preview(manifest, PATCH_SECRET);
+   524	            await send(`PREVIEW OK\n${p.summary}\nCurrent: ${p.currentVersion}\nKeys: ${p.willWriteKeys.join(', ')}`, msg.chat.id);
+   525	            const r = await apply(manifest, String(msg.from.id), PATCH_SECRET);
+   526	            await send(`Patch applied. Backup: backup:${manifest.version}`, msg.chat.id);
+   527	            await adminSessionSet(msg.from.id,{ flow:'patch', step:'applied' });
+   528	            await send('Patch appliqué. Tu peux lancer un 🚀 Upgrade si besoin.', msg.chat.id, adminPatchesKb(true));
+   529	            return;
+   530	          }catch(e){
+   531	            await send('Patch error (text): ' + (e && e.message || e), msg.chat.id);
+   532	            return;
+   533	          }
+   534	        }
+   535	      }
+   536	    }
+   537	  }catch(_){}
+   538	
+   539	  // --- Flux standard ---
+   540	  const chatId=msg.chat?.id; const fromId=msg.from?.id; let text=(msg.text||'').trim();
+   541	
+   542	  let settings=await kv.get('settings');
+   543	  if (!settings){
+   544	    settings = {
+   545	      shopName:'Boutique',
+   546	      description:'Bienvenue dans la boutique. Produits démo.',
+   547	      faq:'Q: Livraison ?\nR: Par colis.\n\nQ: Paiement ?\nR: Cash ou crypto (redirigé vers contact humain en V1).',
+   548	      contactUsername:'TonContactHumain',
+   549	      privateMode:false, requiredChannel:'', channels:[],
+   550	      admins:[ String(fromId) ],
+   551	      deliveryForm:{ fields:{ firstname:true, lastname:true, address1:true, postalCode:true, city:true, country:true } }
+   552	    };
+   553	    await kv.set('settings', settings);
+   554	  }
+   555	
+   556	  if (['/start','FAQ','Description','Menu','/faq','/description','/menu'].includes(text)) {
+   557	    await adminSessionClear(fromId);
+   558	    if (text==='/start' || text==='Menu' || text==='/menu') { await sendHome(chatId); return; }
+   559	    if (text==='FAQ' || text==='/faq') { await send(settings.faq||'—', chatId); return; }
+   560	    if (text==='Description' || text==='/description') { await send(settings.description||'—', chatId); return; }
+   561	    return;
+   562	  }
+   563	
+   564	  if (text==='/cancel'){ await adminSessionClear(fromId); await send('Flow annulé.', chatId); return; }
+   565	
+   566	  if (text==='/admin'){
+   567	    if (!Array.isArray(settings.admins)||settings.admins.length===0){ settings.admins=[String(fromId)]; await kv.set('settings', settings); }
+   568	    if (!isAdmin(fromId, settings)) { await send('Accès admin requis.', chatId); return; }
+   569	    await send('Panneau admin :', chatId, adminRootKb()); return;
+   570	  }
+   571	
+   572	  const sess=await adminSessionGet(fromId);
+   573	  if (sess){ await handleAdminFlowStep(msg, sess); return; }
+   574	
+   575	  await sendHome(chatId);
+   576	}
+   577	async function handleAdminFlowStep(msg, sess){
+   578	  const chatId=msg.chat.id; const userId=msg.from.id;
+   579	
+   580	  if (sess.flow==='add_product'){
+   581	    if (sess.step==='name' && msg.text){ sess.payload.name=msg.text.trim(); sess.step='desc'; await adminSessionSet(userId,sess); await send('Description ?', chatId); return; }
+   582	    if (sess.step==='desc' && msg.text){ sess.payload.description=msg.text.trim(); sess.step='unit'; await adminSessionSet(userId,sess); await send('Unité (ex: 1u = 100g) ?', chatId); return; }
+   583	    if (sess.step==='unit' && msg.text){ sess.payload.unit=msg.text.trim(); sess.step='price'; await adminSessionSet(userId,sess); await send('Prix cash (€) ?', chatId); return; }
+   584	    if (sess.step==='price' && msg.text){
+   585	      const n=Number(msg.text.replace(',','.')); sess.payload.price_cash=isFinite(n)?n:0;
+   586	      sess.step='crypto'; await adminSessionSet(userId,sess); await send('Prix crypto (€) ?', chatId); return;
+   587	    }
+   588	    if (sess.step==='crypto' && msg.text){
+   589	      const n=Number(msg.text.replace(',','.')); sess.payload.price_crypto=isFinite(n)?n:0;
+   590	      sess.step='media'; await adminSessionSet(userId,sess);
+   591	      await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia()); return;
+   592	    }
+   593	    if (sess.step==='media'){
+   594	      let added=0;
+   595	      if (msg.photo?.length){ const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id); if (url){ (sess.payload.media ||= []).push({type:'photo', url}); added++; } }
+   596	      if (msg.video){ const url=await getFileUrl(msg.video.file_id); if (url){ (sess.payload.media ||= []).push({type:'video', url}); added++; } }
+   597	      if (added>0){ await adminSessionSet(userId, sess); await send(`Média ajouté. Total: ${sess.payload.media.length}\nTu peux en ajouter d’autres ou cliquer ➡️ Terminer.`, chatId, kbMedia()); }
+   598	      return;
+   599	    }
+   600	  }
+   601	
+   602	  if (sess.flow==='edit_product'){
+   603	    const products=(await kv.get('products'))||[];
+   604	    if (sess.step==='ask_id' && msg.text){
+   605	      const q=msg.text.trim().toLowerCase();
+   606	      const found=products.find(x => x.id.toLowerCase()===q || x.name.toLowerCase()===q);
+   607	      if (!found){ await send('Introuvable. Réessaie avec ID ou nom exact.', chatId); return; }
+   608	      sess.payload={ id:found.id };
+   609	      sess.step='choose_field';
+   610	      await adminSessionSet(userId, sess);
+   611	      const kb=[
+   612	        [{text:'Nom', callback_data:'admin:edit_field:name'}, {text:'Description', callback_data:'admin:edit_field:description'}],
+   613	        [{text:'Unité', callback_data:'admin:edit_field:unit'}],
+   614	        [{text:'Prix cash', callback_data:'admin:edit_field:price_cash'}, {text:'Prix crypto', callback_data:'admin:edit_field:price_crypto'}],
+   615	        [{text:'Médias', callback_data:'admin:edit_field:media'}],
+   616	        [{text:'Annuler', callback_data:'cancel'}]
+   617	      ];
+   618	      await send(`Modifier <b>${found.name}</b> (${found.id}) — choisis le champ :`, chatId, kb);
+   619	      return;
+   620	    }
+   621	    if (sess.step==='field_val' && msg.text){
+   622	      const products=(await kv.get('products'))||[];
+   623	      const idx = products.findIndex(p=>p.id===sess.payload.id);
+   624	      if (idx<0){ await send('Introuvable.', chatId); return; }
+   625	      const field = sess.payload.field;
+   626	      const val = msg.text.trim();
+   627	      const p = products[idx];
+   628	      if (field==='price_cash' || field==='price_crypto'){ p[field] = Number(val.replace(',','.'))||0; }
+   629	      else { p[field] = val; }
+   630	      products[idx]=p; await kv.set('products', products);
+   631	      await adminSessionClear(userId); await send('✅ Produit modifié.', chatId, adminProductsKb()); return;
+   632	    }
+   633	    if (sess.step==='media'){
+   634	      let added=0;
+   635	      if (msg.photo?.length){ const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id); if (url){ (sess.payload.newMedia ||= []).push({type:'photo', url}); added++; } }
+   636	      if (msg.video){ const url=await getFileUrl(msg.video.file_id); if (url){ (sess.payload.newMedia ||= []).push({type:'video', url}); added++; } }
+   637	      if (added>0){ await adminSessionSet(userId, sess); await send(`Média ajouté. Nouveaux en attente: ${(sess.payload.newMedia||[]).length}\nTu peux en ajouter d’autres ou ➡️ Terminer.`, chatId, kbMedia()); }
+   638	      return;
+   639	    }
+   640	  }
+   641	
+   642	  if (sess.flow==='delete_product'){
+   643	    if (sess.step==='ask' && msg.text){
+   644	      const q=msg.text.trim().toLowerCase(); const products=(await kv.get('products'))||[];
+   645	      const found=products.find(x=>x.id.toLowerCase()===q || x.name.toLowerCase()===q);
+   646	      if (!found){ await send('Introuvable. Réessaie avec ID ou nom exact.', chatId); return; }
+   647	      await adminSessionSet(userId,{ flow:'delete_product', step:'confirm', payload:{ id:found.id, name:found.name } });
+   648	      await send(`Supprimer <b>${found.name}</b> (${found.id}) ?`, chatId, kbConfirm()); return;
+   649	    }
+   650	  }
+   651	
+   652	  if (sess.flow==='set_description' && sess.step==='text' && msg.text){
+   653	    const settings=(await kv.get('settings'))||{}; settings.description=msg.text; await kv.set('settings', settings);
+   654	    await adminSessionClear(userId); await send('✅ Description mise à jour.', chatId, adminTextsKb()); return;
+   655	  }
+   656	  if (sess.flow==='set_faq' && sess.step==='text' && msg.text){
+   657	    const settings=(await kv.get('settings'))||{}; settings.faq=msg.text; await kv.set('settings', settings);
+   658	    await adminSessionClear(userId); await send('✅ FAQ mise à jour.', chatId, adminTextsKb()); return;
+   659	  }
+   660	
+   661	  if (sess.flow==='set_logo' && sess.step==='wait_media'){
+   662	    if (msg.photo?.length){
+   663	      const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id);
+   664	      if (url){ const settings=(await kv.get('settings'))||{}; settings.logoUrl=url; await kv.set('settings', settings); await adminSessionClear(userId); await send('✅ Logo mis à jour.', chatId, adminBrandingKb()); return; }
+   665	    }
+   666	    await send('Envoie une photo pour le logo.', chatId); return;
+   667	  }
+   668	  if (sess.flow==='set_bg' && sess.step==='wait_media'){
+   669	    if (msg.photo?.length){
+   670	      const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id);
+   671	      if (url){ const settings=(await kv.get('settings'))||{}; settings.bgUrl=url; await kv.set('settings', settings); await adminSessionClear(userId); await send('✅ Fond d’écran mis à jour.', chatId, adminBrandingKb()); return; }
+   672	    }
+   673	    await send('Envoie une photo pour le fond d’écran.', chatId); return;
+   674	  }
+   675	  if (sess.flow==='set_name' && sess.step==='ask' && msg.text){
+   676	    const settings=(await kv.get('settings'))||{}; settings.shopName=msg.text.trim(); await kv.set('settings', settings);
+   677	    await adminSessionClear(userId); await send('✅ Nom de la boutique mis à jour.', chatId, adminBrandingKb()); return;
+   678	  }
+   679	
+   680	  if (sess.flow==='channels' && sess.step==='menu' && msg.text){
+   681	    const settings=(await kv.get('settings'))||{}; settings.channels = Array.isArray(settings.channels)?settings.channels:[];
+   682	    const t = msg.text.trim();
+   683	    if (t.toLowerCase().startsWith('supprimer ')){
+   684	      const ch = t.slice(10).trim();
+   685	      settings.channels = settings.channels.filter(c=>c!==ch);
+   686	      await kv.set('settings', settings);
+   687	      await send(`Supprimé: ${ch}\nActuels: ${settings.channels.join(', ')||'(aucun)'}`, chatId);
+   688	    } else if (t.startsWith('@')) {
+   689	      if (!settings.channels.includes(t)) settings.channels.push(t);
+   690	      await kv.set('settings', settings);
+   691	      await send(`Ajouté: ${t}\nActuels: ${settings.channels.join(', ')}`, chatId);
+   692	    } else {
+   693	      await send('Format inconnu. Envoie @canal pour ajouter, ou "supprimer @canal".', chatId);
+   694	    }
+   695	    return;
+   696	  }
+   697	
+   698	  if (sess.flow==='set_contact' && sess.step==='ask' && msg.text){
+   699	    const settings=(await kv.get('settings'))||{}; settings.contactUsername=msg.text.replace(/^@/,''); await kv.set('settings', settings);
+   700	    await adminSessionClear(userId); await send('✅ Contact mis à jour.', chatId, adminContactKb()); return;
+   701	  }
+   702	
+   703	  if (sess.flow==='admins' && sess.step==='add' && msg.text){
+   704	    const id = String(msg.text.trim());
+   705	    const settings=(await kv.get('settings'))||{}; settings.admins = Array.isArray(settings.admins)?settings.admins:[];
+   706	    if (!settings.admins.includes(id)) settings.admins.push(id);
+   707	    await kv.set('settings', settings);
+   708	    await adminSessionClear(userId); await send('✅ Admin ajouté.', chatId, adminAdminsKb()); return;
+   709	  }
+   710	  if (sess.flow==='admins' && sess.step==='remove' && msg.text){
+   711	    const id = String(msg.text.trim());
+   712	    const settings=(await kv.get('settings'))||{}; settings.admins = (settings.admins||[]).filter(x=>x!==id);
+   713	    await kv.set('settings', settings);
+   714	    await adminSessionClear(userId); await send('✅ Admin retiré.', chatId, adminAdminsKb()); return;
+   715	  }
+   716	}
+   717	
+   718	/** === Rapports (menu + helpers) === **/
+   719	function adminReportsKb(){
+   720	  return [
+   721	    [{ text:'Aujourdhui', callback_data:'admin:reports:range:today' }],
+   722	    [{ text:'Semaine',    callback_data:'admin:reports:range:week'  }],
+   723	    [{ text:'Mois',       callback_data:'admin:reports:range:month' }],
+   724	    [{ text:'Annee',      callback_data:'admin:reports:range:year'  }],
+   725	    [{ text:'Retour',     callback_data:'admin:root' }]
+   726	  ];
+   727	}
+   728	function startOfToday(){const tz='Europe/Paris';const now=new Date();const local=new Date(now.toLocaleString('en-US',{timeZone:tz}));local.setHours(0,0,0,0);const offset=local.getTime()-new Date(local.toLocaleString('en-US',{timeZone:'UTC'})).getTime();return local.getTime()-offset;}
+   729	function startOfWeek(){const tz='Europe/Paris';const now=new Date();const local=new Date(now.toLocaleString('en-US',{timeZone:tz}));const day=(local.getDay()+6)%7;local.setHours(0,0,0,0);local.setDate(local.getDate()-day);const offset=local.getTime()-new Date(local.toLocaleString('en-US',{timeZone:'UTC'})).getTime();return local.getTime()-offset;}
+   730	function startOfMonth(){const tz='Europe/Paris';const now=new Date();const local=new Date(now.toLocaleString('en-US',{timeZone:tz}));local.setHours(0,0,0,0);local.setDate(1);const offset=local.getTime()-new Date(local.toLocaleString('en-US',{timeZone:'UTC'})).getTime();return local.getTime()-offset;}
+   731	function startOfYear(){const tz='Europe/Paris';const now=new Date();const local=new Date(now.toLocaleString('en-US',{timeZone:tz}));local.setHours(0,0,0,0);local.setMonth(0,1);const offset=local.getTime()-new Date(local.toLocaleString('en-US',{timeZone:'UTC'})).getTime();return local.getTime()-offset;}
+   732	function rangeTs(kind){
+   733	  if (kind==='today') return startOfToday();
+   734	  if (kind==='week')  return startOfWeek();
+   735	  if (kind==='month') return startOfMonth();
+   736	  if (kind==='year')  return startOfYear();
+   737	  return 0;
+   738	}
+   739	function fmtEUR(n){ return new Intl.NumberFormat('fr-FR',{style:'currency', currency:'EUR'}).format(Number(n||0)); }
+   740	function fmtDate(ts){
+   741	  try{
+   742	    return new Date(ts||Date.now()).toLocaleString('fr-FR',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+   743	  }catch(_){ return new Date(ts||Date.now()).toISOString(); }
+   744	}
+   745	function orderLine(o){
+   746	  const items=(o && o.cart && o.cart.items ? o.cart.items : []).map(i=>String(i.name)+' x '+String(i.qty)).join(', ') || '(vide)';
+   747	  const d=o && o.delivery ? o.delivery : {};
+   748	  const name=[d.firstname||'', d.lastname||''].filter(Boolean).join(' ').trim();
+   749	  const addr=[d.address1||'', [d.postalCode||'', d.city||''].filter(Boolean).join(' '), d.country||''].filter(Boolean).join(', ') || '-';
+   750	  return [
+   751	    '<b>'+o.id+'</b> • '+fmtDate(o.ts),
+   752	    'Produits: '+items,
+   753	    'Paiement: '+(o.payment||'-'),
+   754	    'Total: '+fmtEUR((o.totals&&o.totals.cash)||0)+' (cash) • '+fmtEUR((o.totals&&o.totals.crypto)||0)+' (crypto)',
+   755	    'Adresse: '+(name?name+', ':'')+addr
+   756	  ].join('\n');
+   757	}
+   758	function aggregate(list){let cash=0, crypto=0, count=0;for(let i=0;i<list.length;i++){const o=list[i];if(!o) continue;count++;if(o.payment==="cash"){cash+=Number(o?.totals?.cash||0);}else if(o.payment==="crypto"){crypto+=Number(o?.totals?.crypto||0);}}return {cash,crypto,count};}
+   759	async function handleReports(chatId, kind){
+   760	  const labels = {today:'Aujourd’hui', week:'Semaine', month:'Mois', year:'Année'};
+   761	  const since = rangeTs(kind);
+   762	  const v2 = (await kv.get('orders_v2')) || [];
+   763	  const v1 = (await kv.get('orders')) || [];
+   764	  const seen = new Set();
+   765	  const all = [...v1, ...v2].filter(o => {
+   766	    if (!o || !o.id) return true;
+   767	    if (seen.has(o.id)) return false;
+   768	    seen.add(o.id);
+   769	    return true;
+   770	  });
+   771	  const list = all.filter(o => Number(o.ts||0) >= since).sort((a,b)=>Number(b.ts)-Number(a.ts));
+   772	
+   773	  if (!list.length){
+   774	    await send(`Aucune commande pour la période « ${labels[kind]||kind} ».`, chatId, adminReportsKb());
+   775	    return;
+   776	  }
+   777	
+   778	  const agg = aggregate(list);
+   779	  const header =
+   780	    `<b>📈 Rapports — ${labels[kind]||kind}</b>\n` +
+   781	    `Total commandes: ${agg.count}\n` +
+   782	    `CA: ${fmtEUR(agg.cash)} (cash) • ${fmtEUR(agg.crypto)} (crypto)\n`;
+   783	
+   784	  let msg = header + '\n' + list.map(orderLine).join('\n\n');
+   785	
+   786	  const MAX = 3800;
+   787	  if (msg.length > MAX) {
+   788	    let out = header + '\n';
+   789	    for (const line of list.map(orderLine)) {
+   790	      if (out.length + line.length + 2 > MAX) break;
+   791	      out += line + '\n\n';
+   792	    }
+   793	    msg = out.trimEnd() + '\n\n…(tronqué)';
+   794	  }
+   795	
+   796	  await send(msg, chatId, adminReportsKb());
+   797	}
+   798	// === end Reports block ===
+   799	
+   800	// --- Patch helpers (data only) ---
+   801	async function handleVersion(chatId){
+   802	  try {
+   803	    const codeV = process.env.APP_VERSION || 'n/a';
+   804	    const dataV = await currentDataVersion();
+   805	    await send(`Code: ${codeV}\nData: ${dataV}`, chatId);
+   806	  } catch(e){ await send('Version error: '+(e&&e.message||e), chatId); }
+   807	}
+   808	async function handleRollback(chatId, adminId, target){
+   809	  try {
+   810	    const r = await rollback(target, String(adminId));
+   811	    await send(`Rollback OK → ${r.restoredTo}`, chatId);
+   812	  } catch(e){ await send('Rollback FAIL: '+(e&&e.message||e), chatId); }
+   813	}
+   814	async function handlePatchDocument(msg){
+   815	  const chatId = msg.chat.id; const userId = msg.from.id;
+   816	  try {
+   817	    const settings = (await kv.get('settings')) || {};
+   818	    if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId); return; }
+   819	
+   820	    if (!msg.document || !msg.document.file_id) {
+   821	      await send('Patch error: document manquant.', chatId);
+   822	      return;
+   823	    }
+   824	
+   825	    await send('Récupération du fichier…', chatId);
+   826	    const fid = msg.document.file_id;
+   827	    const url = await getFileUrl(fid);
+   828	    if (!url) { await send('Patch error: URL de fichier introuvable.', chatId); return; }
+   829	
+   830	    const buf = await axios.get(url, { responseType:'arraybuffer' }).then(r=>Buffer.from(r.data));
+   831	    let manifest;
+   832	    try { manifest = JSON.parse(buf.toString('utf8')); }
+   833	    catch(e){ await send('Patch error: JSON invalide ('+(e && e.message || e)+')', chatId); return; }
+   834	
+   835	    await send('Preview en cours…', chatId);
+   836	    let p;
+   837	    try {
+   838	      p = await preview(manifest, PATCH_SECRET);
+   839	    } catch(e){
+   840	      await send('Patch error (preview): '+prettyErr(e), chatId);
+   841	      return;
+   842	    }
+   843	
+   844	    await send(
+   845	      'PREVIEW OK\n'
+   846	      + (p.summary||'') + '\n'
+   847	      + 'Current: '+(p.currentVersion||'?')+'\n'
+   848	      + 'Keys: '+((p.willWriteKeys||[]).join(', ')||'(aucune)'),
+   849	      chatId
+   850	    , null, true);
+   851	
+   852	    await send('Application du patch…', chatId);
+   853	    try {
+   854	      await apply(manifest, String(userId), PATCH_SECRET);
+   855	    } catch(e){
+   856	      await send('Patch error (apply): '+prettyErr(e), chatId);
+   857	      return;
+   858	    }
+   859	
+   860	    try {
+   861	      const hist = (await kv.get('patch:history')) || [];
+   862	      hist.push({ at: Date.now(), from: (p && p.currentVersion)||null, to: manifest.version||null, by: String(userId) });
+   863	      await kv.set('patch:history', hist);
+   864	    } catch(_) {}
+   865	
+   866	    await send('Patch applied. Backup: backup:'+String(manifest.version||'?'), chatId);
+   867	    await adminSessionSet(userId,{ flow:'patch', step:'applied' });
+   868	
+   869	    if (manifest.upgrade === true) {
+   870	      const ok = await triggerUpgrade();
+   871	      await send(ok ? "Code upgrade déclenché (Vercel)" : "Upgrade non déclenché (hook absent ou erreur)", chatId);
+   872	    } else {
+   873	      await send('Tu peux lancer un Upgrade si besoin.', chatId, adminPatchesKb(true));
+   874	    }
+   875	  } catch(e){
+   876	    await send('Patch error: '+prettyErr(e), chatId);
+   877	  }
+   878	}
+   879	
+   880	async function handleUpgrade(chatId, adminId){
+   881	  const settings = (await kv.get('settings')) || {};
+   882	  if (!isAdmin(adminId, settings)) { await send('Accès admin requis.', chatId); return; }
+   883	  try {
+   884	    const ok = await triggerUpgrade();
+   885	    await send(ok ? '🚀 Redeploy demandé à Vercel.' : '⚠️ VERCEL_DEPLOY_HOOK_URL manquant ou erreur.', chatId);
+   886	  } catch(e){
+   887	    await send('Upgrade error: ' + (e && e.message || e), chatId);
+   888	  }
+   889	}
+   890	
+   891	async function triggerUpgrade(){
+   892	  try {
+   893	    const url = process.env.VERCEL_DEPLOY_HOOK_URL;
+   894	    if (!url || !/^https?:\/\//.test(url)) return false;
+   895	    await axios.post(url, {}); // simple ping
+   896	    return true;
+   897	  } catch(_) { return false; }
+   898	}
+   899	
+   900	
+   901	
+   902	function adminPatchesKb(showUpgrade){
+   903	  const base = [
+   904	    [{ text:'📥 Appliquer un patch', callback_data:'admin:patch_wait' }],
+   905	    [{ text:'📜 Historique', callback_data:'admin:patch_history' }],
+   906	    [{ text:'🧾 Version', callback_data:'admin:version' }],
+   907	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   908	  ];
+   909	  if (showUpgrade) base.splice(2, 0, [{ text:'🚀 Upgrade', callback_data:'admin:upgrade' }]);
+   910	  return base;
+   911	}
+   912	
+
+## api/order.js (FULL)
+     1	// api/order.js
+     2	const axios = require('axios');
+     3	const { kv } = require('@vercel/kv');
+     4	
+     5	const BOT = () => {
+     6	  const token = process.env.TELEGRAM_BOT_TOKEN;
+     7	  return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
+     8	};
+     9	
+    10	function genOrderId() {
+    11	  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    12	  let s = '';
+    13	  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random()*chars.length)];
+    14	  return '#' + s;
+    15	}
+    16	
+    17	function totals(cart) {
+    18	  const items = cart?.items || [];
+    19	  let cash = 0, crypto = 0;
+    20	  for (const it of items) {
+    21	    const q = Number(it.qty||0);
+    22	    cash   += q * Number(it.price_cash||0);
+    23	    crypto += q * Number(it.price_crypto||0);
+    24	  }
+    25	  return { cash, crypto };
+    26	}
+    27	
+    28	module.exports = async (req, res) => {
+    29	  try {
+    30	    if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed'); }
+    31	    const body = JSON.parse(await readBody(req) || '{}');
+    32	    const { user, cart, delivery, payment } = body || {};
+    33	
+    34	    const settings = (await kv.get('settings')) || {};
+    35	    const contactUsername = settings.contactUsername || 'TonContactHumain';
+    36	
+    37	    // ID aléatoire unique
+    38	    let orderId = null;
+    39	    for (let i = 0; i < 8; i++) {
+    40	      const candidate = genOrderId();
+    41	      const exists = await kv.get(`order:${candidate}`);
+    42	      if (!exists) { orderId = candidate; await kv.set(`order:${candidate}`, { ts: Date.now() }); break; }
+    43	    }
+    44	    if (!orderId) orderId = genOrderId();
+    45	
+    46	    const sum = totals(cart);
+    47	    const text = formatOrderText(cart, delivery, payment, orderId, sum);
+    48	
+    49	    // Contact humain (@)
+    50	    await BOT().post('/sendMessage', {
+    51	      chat_id: `@${contactUsername}`, text, parse_mode:'HTML', disable_web_page_preview:true
+    52	    }).catch(()=>{});
+    53	
+    54	    // Admins
+    55	    const adminIds = Array.isArray(settings.admins) ? settings.admins : [];
+    56	    for (const adminId of new Set(adminIds.map(String))) {
+    57	      if (/^\d+$/.test(adminId)) {
+    58	        await BOT().post('/sendMessage', {
+    59	          chat_id: adminId, text, parse_mode:'HTML', disable_web_page_preview:true
+    60	        }).catch(()=>{});
+    61	      }
+    62	    }
+    63	
+    64	    // Accusé utilisateur
+    65	    if (user?.id) {
+    66	      const link = `https://t.me/${contactUsername}`;
+    67	      const ack = [
+    68	        `✅ <b>Votre commande ${orderId} a été validée !</b>`,
+    69	        `Total: ${fmtEUR(sum.cash)} (cash) • ${fmtEUR(sum.crypto)} (crypto)`,
+    70	        ``,
+    71	        `▶️ Envoyez un message au contact ci-dessous et fournissez votre <b>numéro de commande</b> :`,
+    72	        `<a href="${link}">@${contactUsername}</a>`,
+    73	        ``,
+    74	        `Le contact finalisera le paiement et le suivi de la livraison.`
+    75	      ].join('\n');
+    76	      await BOT().post('/sendMessage', {
+    77	        chat_id: user.id, text: ack, parse_mode:'HTML', disable_web_page_preview:false
+    78	      }).catch(()=>{});
+    79	    }
+    80	
+    81	    // 🔸 Persistance pour Rapports
+    82	    const orders = (await kv.get('orders_v2')) || [];
+    83	    const safeUser = user ? { id: user.id, username: user.username||'' } : null;
+    84	    orders.push({
+    85	      id: orderId,
+    86	      ts: Date.now(),
+    87	      user: safeUser,
+    88	      cart: cart || {},
+    89	      delivery: delivery || {},
+    90	      payment: payment || '',
+    91	      totals: { cash: Number(sum.cash||0), crypto: Number(sum.crypto||0) }
+    92	    });
+    93	    await kv.set('orders_v2', orders);
+    94	
+    95	    res.setHeader('Content-Type', 'application/json');
+    96	    res.statusCode = 200;
+    97	    res.end(JSON.stringify({ ok:true, contact_link:`https://t.me/${contactUsername}`, order_id:orderId }));
+    98	  } catch (e) {
+    99	    res.statusCode = 500;
+   100	    res.end('ERR_ORDER:' + e.message);
+   101	  }
+   102	};
+   103	
+   104	function formatOrderText(cart, delivery, payment, orderId, sum) {
+   105	  const d = delivery || {};
+   106	  const items = (cart?.items || []).map(it =>
+   107	    `• ${it.name}${(it.variantLabel?(' ('+it.variantLabel+')'):(it.unit?(' ('+it.unit+')'):''))} x ${it.qty} — Cash: ${it.price_cash} / Crypto: ${it.price_crypto}`
+   108	  ).join('\n');
+   109	
+   110	  const addr = [
+   111	    `${(d.firstname||'').trim()} ${(d.lastname||'').trim()}`.trim(),
+   112	    (d.address1||'').trim(),
+   113	    [d.postalCode, d.city].filter(Boolean).join(' '),
+   114	    (d.country||'').trim()
+   115	  ].filter(Boolean).join('\n');
+   116	
+   117	  return [
+   118	    `<b>Nouvelle commande ${orderId}</b>`,
+   119	    `🧺 Panier:\n${items || '(vide)'}`,
+   120	    `💳 Paiement choisi: ${payment}`,
+   121	    `💰 Total: ${fmtEUR(sum.cash)} (cash) • ${fmtEUR(sum.crypto)} (crypto)`,
+   122	    `🏠 Livraison:\n${addr}`
+   123	  ].join('\n');
+   124	}
+   125	
+   126	function fmtEUR(n){ return new Intl.NumberFormat('fr-FR',{style:'currency', currency:'EUR'}).format(Number(n||0)); }
+   127	
+   128	function readBody(req) {
+   129	  return new Promise((resolve, reject) => {
+   130	    let data = '';
+   131	    req.on('data', c => data += c);
+   132	    req.on('end', () => resolve(data));
+   133	    req.on('error', reject);
+   134	  });
+   135	}
+
+## public/webapp/app.js (HEAD)
+     1	(function(){try{
+     2	window.addEventListener('error',function(e){
+     3	  try{
+     4	    var d=document.createElement('pre');
+     5	    d.style.cssText='white-space:pre-wrap;color:#fff;background:#c00;padding:8px;position:fixed;left:0;right:0;top:0;z-index:99999;font-size:12px';
+     6	    d.textContent='JS ERROR: '+(e.message||'')+' — '+(e.filename||'')+':'+(e.lineno||'');
+     7	    document.body && document.body.appendChild(d);
+     8	  }catch(_){}
+     9	}, true);
+    10	}catch(_){}})();
+    11	const tg = window.Telegram?.WebApp;
+    12	tg?.ready?.();
+    13	
+    14	const state = {
+    15	  settings: null,
+    16	  products: [],
+    17	  cart: JSON.parse(localStorage.getItem('cart')||'{"items":[]}'),
+    18	  checkoutStep: 'cart',
+    19	};
+    20	
+    21	try{init();}catch(e){(function(){try{var d=document.createElement('pre');d.style.cssText='white-space:pre-wrap;color:#fff;background:#c00;padding:8px;position:fixed;left:0;right:0;top:0;z-index:99999;font-size:12px';d.textContent='JS ERROR: '+(e&&e.message||e)+'\n'+(e&&e.stack||'');document.body&&document.body.appendChild(d);}catch(_){alert('JS ERROR: '+(e&&e.message||e));}})();}
+    22	
+    23	async function init() {
+    24	  const res = await fetch('/api/products');
+    25	  const { settings, products } = await res.json();
+    26	  state.settings = settings || {};
+    27	  state.products = products || [];
+    28	try {
+    29	  if (Array.isArray(state.products) && state.products.length>0 && !Array.isArray(state.products[0].quantities)) {
+    30	    state.products[0].quantities = [
+    31	      {label:"10g",  price_cash:5,  price_crypto:6},
+    32	      {label:"50g",  price_cash:20, price_crypto:24},
+    33	      {label:"100g", price_cash:35, price_crypto:42}
+    34	    ];
+    35	  }
+    36	} catch(_){}
+    37	
+    38	  // Title & branding
+    39	  const logo = document.getElementById('logo');
+    40	  const logoPh = document.getElementById('logoPh');
+    41	  const title = document.getElementById('shopTitle');
+    42	  title.textContent = state.settings.shopName || 'Boutique';
+    43	
+    44	  if (state.settings.logoUrl) { logo.src = state.settings.logoUrl; logo.style.display='block'; logoPh.style.display='none'; }
+    45	  else { logo.style.display='none'; logoPh.style.display='flex'; }
+    46	
+    47	  if (state.settings.bgUrl) {
+    48	    const app = document.getElementById('app');
+    49	    app.style.backgroundImage = `url('${state.settings.bgUrl}')`;
+    50	  }
+    51	
+    52	  setupTabs();
+    53	  renderCatalog();
+    54	  renderDescFaqContact();
+    55	  hookupCartModal();
+    56	  applyDeliveryFieldsVisibility();
+    57	}
+    58	
+    59	function setupTabs() {
+    60	  document.querySelectorAll('.tabs button').forEach(btn=>{
+    61	    btn.onclick = ()=>{
+    62	      document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+    63	      btn.classList.add('active');
+    64	      document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+    65	      document.getElementById(btn.dataset.tab).classList.add('active');
+    66	    };
+    67	  });
+    68	}
+    69	
+    70	function renderDescFaqContact() {
+    71	  document.getElementById('descText').textContent = state.settings.description || '—';
+    72	  document.getElementById('faqText').textContent = state.settings.faq || '—';
+    73	  const contact = state.settings.contactUsername ? `https://t.me/${state.settings.contactUsername}` : '#';
+    74	  document.getElementById('contactBlock').innerHTML =
+    75	    state.settings.contactUsername
+    76	      ? `Contact humain : <a href="${contact}" target="_blank">@${state.settings.contactUsername}</a>`
+    77	      : `Aucun contact défini.`;
+    78	}
+    79	
+    80	function renderCatalog() {
+    81	  const root = document.getElementById('catalog');
+    82	  root.innerHTML = '';
+    83	  state.products.forEach(p=>{
+    84	    const card = document.createElement('div'); card.className='card';
+    85	
+    86	    // Galerie médias (tous)
+    87	    if (Array.isArray(p.media) && p.media.length){
+    88	      const gal = document.createElement('div'); gal.className='gallery';
+    89	      p.media.forEach(m => { const el = mediaEl(m); if (el) gal.appendChild(el); });
+    90	      card.appendChild(gal);
+    91	    }
+    92	
+    93	    const hasVariants = Array.isArray(p.quantities) && p.quantities.length>0;
+    94	    const unitInfo = (!hasVariants && p.unit) ? ` (${p.unit})` : '';
+    95	    const baseCash = fmtEUR(p.price_cash||0);
+    96	    const baseCrypto = fmtEUR(p.price_crypto||0);
+    97	
+    98	    // Bloc prix (dyn si variantes)
+    99	    let priceBlock = '';
+   100	    if (hasVariants) {
+   101	      const first = p.quantities[0] || {price_cash:0, price_crypto:0};
+   102	      priceBlock = `
+   103	        <div class="row" style="margin-left:auto; gap:16px;">
+   104	          <div>Prix cash : <span id="pc-${p.id}">${fmtEUR(first.price_cash||0)}</span></div>
+   105	          <div>Prix crypto : <span id="pr-${p.id}">${fmtEUR(first.price_crypto||0)}</span></div>
+   106	        </div>`;
+   107	    } else {
+   108	      priceBlock = `
+   109	        <div class="row" style="margin-left:auto; gap:16px;">
+   110	          <div>Prix cash : ${baseCash}</div>
+   111	          <div>Prix crypto : ${baseCrypto}</div>
+   112	        </div>`;
+   113	    }
+   114	
+   115	    // Select variantes si présent
+   116	    let variantHtml = '';
+   117	    if (hasVariants) {
+   118	      const opts = p.quantities.map((q,i)=>`<option value="${i}">${q.label} — ${fmtEUR(q.price_cash||0)} / ${fmtEUR(q.price_crypto||0)}</option>`).join('');
+   119	      variantHtml = `
+   120	        <div class="row" style="margin:8px 0;">
+   121	          <label style="margin-right:8px;">Quantité</label>
+   122	          <select class="variantSel" data-id="${p.id}">${opts}</select>
+   123	        </div>`;
+   124	    }
+   125	
+   126	    card.innerHTML += `
+   127	      <h3>${p.name}</h3>
+   128	      <div class="row">${p.description || ''}</div>
+   129	      ${variantHtml}
+   130	      <div class="row">
+   131	        ${!hasVariants ? `<div class="qty"><label>Qté${unitInfo}</label><div class="qtybox"><button type="button" class="minus" data-id="${p.id}">−</button><input type="number" min="1" value="1" data-id="${p.id}" class="qtyInput"><button type="button" class="plus" data-id="${p.id}">+</button></div></div>` : ''}
+   132	        ${priceBlock}
+   133	      </div>
+   134	      <button class="primary" data-add="${p.id}">Ajouter au panier</button>
+   135	    `;
+   136	    root.appendChild(card);
+   137	  });
+   138	
+   139	  // +/- handlers
+   140	  root.querySelectorAll('button.minus').forEach(b=>{
+   141	    b.onclick = ()=>{
+   142	      const id=b.getAttribute('data-id');
+   143	      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+   144	      const v = Math.max(1, (parseInt(input.value,10)||1) - 1);
+   145	      input.value = v;
+   146	    };
+   147	  });
+   148	  root.querySelectorAll('button.plus').forEach(b=>{
+   149	    b.onclick = ()=>{
+   150	      const id=b.getAttribute('data-id');
+   151	      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+   152	      input.value = Math.max(1, (parseInt(input.value,10)||1) + 1);
+   153	    };
+   154	  });
+   155	
+   156	  // variantes: maj prix à la volée
+   157	  root.querySelectorAll('select.variantSel').forEach(sel=>{
+   158	    sel.onchange = ()=>{
+   159	      const id = sel.getAttribute('data-id');
+   160	      const p = state.products.find(x=>x.id===id);
+   161	      if (!p) return;
+   162	      const idx = parseInt(sel.value,10)||0;
+   163	      const v = (Array.isArray(p.quantities)&&p.quantities[idx]) ? p.quantities[idx] : null;
+   164	      if (!v) return;
+   165	      const pc = document.getElementById('pc-'+id);
+   166	      const pr = document.getElementById('pr-'+id);
+   167	      if (pc) pc.textContent = fmtEUR(v.price_cash||0);
+   168	      if (pr) pr.textContent = fmtEUR(v.price_crypto||0);
+   169	    };
+   170	  });
+   171	
+   172	  // Ajouter au panier
+   173	  
+   174	  root.querySelectorAll('button[data-add]').forEach(btn=>{
+   175	    btn.onclick = ()=>{
+   176	      const id = btn.getAttribute('data-add');
+   177	      const p = state.products.find(x=>x.id===id);
+   178	
+   179	      let qty = 1; // valeur par défaut
+   180	      let price_cash = p.price_cash, price_crypto = p.price_crypto;
+   181	      let variantLabel = '';
+   182	
+   183	      const select = root.querySelector(`select.variantSel[data-id="${id}"]`);
+   184	      if (select && Array.isArray(p.quantities) && p.quantities.length>0) {
+   185	        const idx = parseInt(select.value,10)||0;
+   186	        const v = p.quantities[idx] || {};
+   187	        variantLabel = v.label || '';
+   188	        price_cash = v.price_cash || 0;
+   189	        price_crypto = v.price_crypto || 0;
+   190	      } else {
+   191	        const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+   192	        qty = Math.max(1, parseInt(input?.value,10) || 1);
+   193	      }
+   194	
+   195	      addToCart({
+   196	        id: p.id,
+   197	        name: p.name,
+   198	        unit: p.unit,
+   199	        variantLabel,
+   200	        price_cash,

@@ -1,0 +1,416 @@
+=== AUDIT 1.1.7 — cwd=/Users/ewanlanglais/dev/tg-miniapp-shop-tmp ===
+$ git branch --show-current || true
+fix/admin-variants-clean
+$ git status -sb || true
+## fix/admin-variants-clean...origin/fix/admin-variants-clean
+MM api/bot.js
+?? bot-full.txt
+?? diag-full.out
+?? diag-full.sh
+$ node --version || true
+v24.7.0
+$ ls -la api || true
+total 216
+drwxr-xr-x   8 ewanlanglais  staff    256 19 sep 16:20 .
+drwxr-xr-x  23 ewanlanglais  staff    736 19 sep 17:36 ..
+-rw-r--r--   1 ewanlanglais  staff    349 16 sep 18:07 _kv.js
+-rw-r--r--   1 ewanlanglais  staff   4156 16 sep 18:07 _patchEngine.js
+-rw-r--r--   1 ewanlanglais  staff  44285 19 sep 18:24 bot.js
+-rw-r--r--   1 ewanlanglais  staff  40932 17 sep 13:15 bot.js.bak
+-rw-r--r--   1 ewanlanglais  staff   4650 18 sep 19:27 order.js
+-rw-r--r--   1 ewanlanglais  staff   1557 16 sep 18:51 products.js
+$ ls -la public/webapp || true
+total 96
+drwxr-xr-x  7 ewanlanglais  staff    224 18 sep 19:54 .
+drwxr-xr-x  3 ewanlanglais  staff     96 16 sep 16:45 ..
+-rw-r--r--  1 ewanlanglais  staff  21681 18 sep 19:54 app.js
+-rw-r--r--  1 ewanlanglais  staff    343 16 sep 16:45 cart.css
+-rw-r--r--  1 ewanlanglais  staff   7339 16 sep 16:45 enhance.js
+-rw-r--r--  1 ewanlanglais  staff   3343 16 sep 16:45 index.html
+-rw-r--r--  1 ewanlanglais  staff   6382 16 sep 16:45 styles.css
+$ echo '## node --check api/bot.js' && node --check api/bot.js || true
+## node --check api/bot.js
+/Users/ewanlanglais/dev/tg-miniapp-shop-tmp/api/bot.js:198
+      const lines = hist.slice(-10).map(h=>`• ${h.at||'-'} : ${h.from||'?'} → ${h.to||'?'} ${h.rollback?'(rollback)':''}`].join('
+                                                                                                                       ^^
+
+SyntaxError: missing ) after argument list
+    at wrapSafe (node:internal/modules/cjs/loader:1669:18)
+    at checkSyntax (node:internal/main/check_syntax:76:3)
+
+Node.js v24.7.0
+$ echo '## node --check api/_patchEngine.js' && node --check api/_patchEngine.js || true
+## node --check api/_patchEngine.js
+$ echo '## node --check public/webapp/app.js' && node --check public/webapp/app.js || true
+## node --check public/webapp/app.js
+$ echo '## grep admin:prod_list' && grep -n 'admin:prod_list' api/bot.js || true
+## grep admin:prod_list
+89:    [{ text:'📋 Lister', callback_data:'admin:prod_list' }],
+229:  if (data==='admin:prod_list'){
+$ echo '## grep quantities/unit/price' && grep -nE 'quantities|variant(Label)?|unit[^a-zA-Z]|price_cash|price_crypto' api/bot.js || true
+## grep quantities/unit/price
+255:      const labelMap={name:'Nom',description:'Description',unit:'Unité',price_cash:'Prix cash (€)',price_crypto:'Prix crypto (€)'};
+366:        `• Unité: ${p.unit}`,
+367:        `• Cash: ${p.price_cash} € | Crypto: ${p.price_crypto} €`,
+407:      else if (sess.step==='price'){ await adminSessionSet(userId,{...sess, step:'unit'}); await send('Unité (ex: 1u = 100g) ?', chatId); }
+408:      else if (sess.step==='unit'){ await adminSessionSet(userId,{...sess, step:'desc'}); await send('Description ?', chatId); }
+520:      sess.payload.quantities = []; // start fresh
+522:      await send('Première variante — libellé (ex: 10g, 50g, ...)
+529:      await send('Prix cash (€) pour cette variante ?', chatId); return;
+533:      sess.payload.__cur.price_cash = isFinite(n)?n:0;
+535:      await send('Prix crypto (€) pour cette variante ?', chatId); return;
+539:      sess.payload.__cur.price_crypto = isFinite(n)?n:0;
+541:      (sess.payload.quantities ||= []).push(sess.payload.__cur);
+544:      await send('Ajouter une autre variante ? (oui/non)', chatId); return;
+550:        await send('Libellé de la nouvelle variante ?', chatId); return;
+579:        [{text:'Unité', callback_data:'admin:edit_field:unit'}],
+580:        [{text:'Prix cash', callback_data:'admin:edit_field:price_cash'}, {text:'Prix crypto', callback_data:'admin:edit_field:price_crypto'}],
+582:        [{text:'Quantités', callback_data:'admin:edit_field:quantities'}],
+596:      if (field==='price_cash' || field==='price_crypto'){ p[field] = Number(val.replace(',','.'))||0; }
+620:      (sess.payload.__cur ||= {}); sess.payload.__cur.price_cash = isFinite(n)?n:0;
+626:      (sess.payload.__cur ||= {}); sess.payload.__cur.price_crypto = isFinite(n)?n:0;
+630:      await send('Ajouter une autre variante ? (oui/non)', chatId); return;
+636:        await send('Libellé de la nouvelle variante ?', chatId); return;
+641:      products[idx].quantities = Array.isArray(sess.payload.qs) ? sess.payload.qs : [];
+642:      // on garde unit/price_* existants si tu veux, mais ils ne seront plus utilisés par le front quand quantities existe
+754:    const tag  = it.variantLabel ? ` (${it.variantLabel})` : (it.unit?` (${it.unit})`:'');
+755:    const pc   = Number(it.price_cash||0);
+756:    const pr   = Number(it.price_crypto||0);
+$ echo '## grep ).join / ].join' && grep -nE '\)\.join\(|\]\.join\(' api/bot.js || true
+## grep ).join / ].join
+198:      const lines = hist.slice(-10).map(h=>`• ${h.at||'-'} : ${h.from||'?'} → ${h.to||'?'} ${h.rollback?'(rollback)':''}`].join('
+303:    const list = (settings.channels||[]).join('\n• ');
+330:    const admins = (settings.admins||[]).map(id=>`• ${id}`).join('\n') || '(aucun)';
+369:      ].join('
+758:  }).join(', ') || '(vide)';
+760:  const name=[d.firstname||'', d.lastname||''].filter(Boolean).join('\n').trim();
+761:  const addr=[d.address1||'', [d.postalCode||'', d.city||''].filter(Boolean).join('\n'), d.country||''].filter(Boolean).join(', ') || '-';
+768:  ].join('
+771:  const name=[d.firstname||'', d.lastname||''].filter(Boolean).join('\n').trim();
+772:  const addr=[d.address1||'', [d.postalCode||'', d.city||''].filter(Boolean).join('\n'), d.country||''].filter(Boolean).join(', ') || '-';
+779:  ].join('
+808:  let msg = header + '\n' + list.map(orderLine).join('\n\n');
+872:      + 'Keys: '+((p.willWriteKeys||[]).join(', ')||'(aucune)'),
+$ echo '## grep await send(… variantes) ' && grep -n "Nouvelle liste de variantes" api/bot.js || true
+## grep await send(… variantes) 
+
+-- context /admin:prod_list/ lines 79..249 in api/bot.js --
+   79     [{ text:'📦 Formulaire', callback_data:'admin:cat_form' }],
+   80     [{ text:'📞 Contact', callback_data:'admin:cat_contact' }],
+   81     [{ text:'👑 Admins', callback_data:'admin:cat_admins' }],
+   82     [{ text:'📈 Rapports', callback_data:'admin:cat_reports' }],
+   83     [{ text:'🧩 Patchs', callback_data:'admin:cat_patches' }]
+   84   ];
+   85 }
+   86 
+   87 function adminProductsKb(){
+   88   return [
+   89     [{ text:'📋 Lister', callback_data:'admin:prod_list' }],
+   90     [{ text:'➕ Ajouter', callback_data:'admin:add_product' }],
+   91     [{ text:'✏️ Modifier', callback_data:'admin:edit_product' }],
+   92     [{ text:'🗑️ Supprimer', callback_data:'admin:delete_product' }],
+   93     [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   94   ];
+   95 }
+   96 function adminTextsKb(){
+   97   return [
+   98     [{ text:'✏️ Description', callback_data:'admin:set_description' }],
+   99     [{ text:'✏️ FAQ', callback_data:'admin:set_faq' }],
+  100     [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+  101   ];
+  102 }
+  103 function adminBrandingKb(){
+  104   return [
+  105     [{ text:'🖼️ Logo', callback_data:'admin:set_logo' }, { text:'🖼️ Fond', callback_data:'admin:set_bg' }],
+  106     [{ text:'♻️ Revenir au fond par défaut', callback_data:'admin:reset_bg' }],
+  107     [{ text:'🏷️ Nom boutique', callback_data:'admin:set_name' }],
+  108     [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+  109   ];
+  110 }
+  111 function adminAccessKb(){
+  112   return [
+  113     [{ text:'Rendre PUBLIC', callback_data:'admin:set_access:public' }],
+  114     [{ text:'Rendre PRIVÉ', callback_data:'admin:set_access:private' }],
+  115     [{ text:'Canaux privés (ajouter/supprimer)', callback_data:'admin:channels_manage' }],
+  116     [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+  117   ];
+  118 }
+  119 function adminFormKb(fields){
+  120   const f=fields||{};
+  121   return [
+  122     [{ text:`Prénom: ${f.firstname?'✅':'❌'}`, callback_data:'admin:form_toggle:firstname' }, { text:`Nom: ${f.lastname?'✅':'❌'}`, callback_data:'admin:form_toggle:lastname' }],
+  123     [{ text:`Adresse: ${f.address1?'✅':'❌'}`, callback_data:'admin:form_toggle:address1' }],
+  124     [{ text:`CP: ${f.postalCode?'✅':'❌'}`, callback_data:'admin:form_toggle:postalCode' }, { text:`Ville: ${f.city?'✅':'❌'}`, callback_data:'admin:form_toggle:city' }],
+  125     [{ text:`Pays: ${f.country?'✅':'❌'}`, callback_data:'admin:form_toggle:country' }],
+  126     [{ text:'🔁 Réinitialiser', callback_data:'admin:form_reset' }],
+  127     [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+  128   ];
+  129 }
+  130 function adminContactKb(){
+  131   return [
+  132     [{ text:'✏️ Contact Telegram', callback_data:'admin:set_contact' }],
+  133     [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+  134   ];
+  135 }
+  136 function adminAdminsKb(){
+  137   return [
+  138     [{ text:'📋 Lister', callback_data:'admin:admins_list' }],
+  139     [{ text:'➕ Ajouter', callback_data:'admin:admin_add' }, { text:'🗑️ Retirer', callback_data:'admin:admin_remove' }],
+  140     [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+  141   ];
+  142 }
+  143 function kbConfirm(extra=[]) {
+  144   return [[
+  145     { text:'✅ Valider', callback_data:'ok' },
+  146     { text:'🔄 Revenir', callback_data:'back' },
+  147     { text:'✖️ Annuler', callback_data:'cancel' },
+  148     ...extra
+  149   ]];
+  150 }
+  151 function kbMedia(){
+  152   return [[
+  153     { text:'➕ Ajouter d’autres médias', callback_data:'more_media' },
+  154     { text:'🧹 Vider médias', callback_data:'clear_media' },
+  155     { text:'➡️ Terminer', callback_data:'finish_media' }
+  156   ],[
+  157     { text:'✖️ Annuler', callback_data:'cancel' }
+  158   ]];
+  159 }
+  160 
+  161 /** ===== Callbacks ===== **/
+  162 async function onCallbackQuery(cbq){
+  163   const chatId=cbq.message?.chat?.id; const userId=cbq.from?.id; const data=cbq.data||'';
+  164   try { await BOT().post('/answerCallbackQuery',{ callback_query_id: cbq.id }); } catch (_) {}
+  165   let settings=await kv.get('settings');
+  166   if (!settings){ settings={admins:[String(userId)]}; await kv.set('settings', settings); }
+  167   if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId, null, true); return; }
+  168 
+  169   // Root & catégories
+  170   if (data==='admin:root'){ await send('Panneau admin :', chatId, adminRootKb()); return; }
+  171   if (data==='admin:cat_products'){ await send('Produits :', chatId, adminProductsKb()); return; }
+  172   if (data==='admin:cat_texts'){ await send('Textes :', chatId, adminTextsKb()); return; }
+  173   if (data==='admin:cat_branding'){ await send('Branding :', chatId, adminBrandingKb()); return; }
+  174   if (data==='admin:cat_access'){ await send('Accès :', chatId, adminAccessKb()); return; }
+  175   if (data==='admin:cat_form'){
+  176     const fields = (settings.deliveryForm?.fields) || {};
+  177     await send('Formulaire de livraison (activer/désactiver champs) :', chatId, adminFormKb(fields)); return;
+  178   }
+  179   if (data==='admin:cat_contact'){ await send('Contact :', chatId, adminContactKb()); return; }
+  180   if (data==='admin:cat_admins'){ await send('Admins :', chatId, adminAdminsKb()); return; }
+  181 
+  182   if (data==='admin:cat_patches'){
+  183     const sess = await adminSessionGet(userId);
+  184     const showUp = !!(sess && sess.flow==='patch' && sess.step==='applied');
+  185     await send('🧩 Patchs :', chatId, adminPatchesKb(showUp));
+  186     return;
+  187   }
+  188   if (data==='admin:version'){ await handleVersion(chatId); return; }
+  189   if (data==='admin:patch_wait'){
+  190     await adminSessionSet(userId,{ flow:'patch', step:'wait_doc' });
+  191     await send('Envoie le fichier JSON du patch (comme *Document*).', chatId, adminPatchesKb(false));
+  192     return;
+  193   }
+  194   if (data==='admin:patch_history'){
+  195     try{
+  196       const hist = (await kv.get('patch:history')) || [];
+  197       if (!hist.length){ await send('Aucun patch appliqué pour le moment.', chatId, adminPatchesKb(false)); return; }
+  198       const lines = hist.slice(-10).map(h=>`• ${h.at||'-'} : ${h.from||'?'} → ${h.to||'?'} ${h.rollback?'(rollback)':''}`].join('
+  199 ');
+  200       await send(`<b>Derniers patchs</b>\n${lines}`, chatId, adminPatchesKb(true));
+  201     }catch(e){ await send('Erreur historique: '+(e&&e.message||e), chatId); }
+  202     return;
+  203   }
+  204 
+  205 
+  206   if (data==='admin:cat_patches'){ await send('🧩 Patchs :', chatId, adminPatchesKb()); return; }
+  207   if (data==='admin:version'){ await handleVersion(chatId); return; }
+  208   if (data==='admin:upgrade'){ await handleUpgrade(chatId, userId); return; }
+  209   if (data==='admin:patch_wait'){
+  210     await adminSessionSet(userId,{ flow:'patch', step:'wait_doc' });
+  211     await send('Envoie maintenant le fichier JSON du patch (comme *Document*).', chatId, adminPatchesKb());
+  212     return;
+  213   }
+  214 
+  215 
+  216   // Rapports (menu + boutons)
+  217   if (data==='admin:cat_reports'){ await send('📈 Rapports — choisis une période :', chatId, adminReportsKb()); return; }
+  218   if (data.startsWith('admin:reports:range:')){
+  219     try {
+  220       const kind = data.split(':').pop();
+  221       await handleReports(chatId, kind);
+  222     } catch (e) {
+  223       await send('Erreur rapports: ' + String(e && e.message || e), chatId);
+  224     }
+  225     return;
+  226   }
+  227 
+  228   // Produits
+  229   if (data==='admin:prod_list'){
+  230   const products = (await kv.get('products')) || [];
+  231   if (!products.length){
+  232     await send('Produits actifs\n\n(aucun)', chatId, adminProductsKb());
+  233     return;
+  234   }
+  235 }
+  236 
+  237 
+  238   if (data==='admin:add_product'){
+  239     await adminSessionSet(userId,{ flow:'add_product', step:'name', payload:{ media:[] } });
+  240     await send('Nom du produit ?', chatId); return;
+  241   }
+  242   if (data==='admin:edit_product'){
+  243     await adminSessionSet(userId,{ flow:'edit_product', step:'ask_id' });
+  244     await send('ID ou nom du produit à modifier ?', chatId); return;
+  245   }
+  246   if (data.startsWith('admin:edit_field:')){
+  247     const field = data.split(':')[2];
+  248     const sess=await adminSessionGet(userId);
+  249     if (!sess || sess.flow!=='edit_product' || !sess.payload?.id) return;
+
+-- context /function orderLine/ lines 745..890 in api/bot.js --
+  745 function fmtDate(ts){
+  746   try{
+  747     return new Date(ts||Date.now()).toLocaleString('fr-FR',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  748   }catch(_){ return new Date(ts||Date.now()).toISOString(); }
+  749 }
+  750 function orderLine(o){
+  751   const items = (o?.cart?.items||[]).map(it=>{
+  752     const name = String(it.name||'?');
+  753     const qty  = Number(it.qty||0);
+  754     const tag  = it.variantLabel ? ` (${it.variantLabel})` : (it.unit?` (${it.unit})`:'');
+  755     const pc   = Number(it.price_cash||0);
+  756     const pr   = Number(it.price_crypto||0);
+  757     return `${name}${tag} x ${qty} — Cash: ${pc} / Crypto: ${pr}`;
+  758   }).join(', ') || '(vide)';
+  759   const d=o?.delivery||{};
+  760   const name=[d.firstname||'', d.lastname||''].filter(Boolean).join('\n').trim();
+  761   const addr=[d.address1||'', [d.postalCode||'', d.city||''].filter(Boolean).join('\n'), d.country||''].filter(Boolean).join(', ') || '-';
+  762   return [
+  763     `${o.id} • ${fmtDate(o.ts)}`,
+  764     `Produits: ${items}`,
+  765     `Paiement: ${o.payment||'-'}`,
+  766     `Total: ${fmtEUR(o?.totals?.cash||0)} (cash) • ${fmtEUR(o?.totals?.crypto||0)} (crypto)`,
+  767     `Adresse: ${name?(name+', '):''}${addr}`
+  768   ].join('
+  769 ');
+  770 };
+  771   const name=[d.firstname||'', d.lastname||''].filter(Boolean).join('\n').trim();
+  772   const addr=[d.address1||'', [d.postalCode||'', d.city||''].filter(Boolean).join('\n'), d.country||''].filter(Boolean).join(', ') || '-';
+  773   return [
+  774     '<b>'+o.id+'</b> • '+fmtDate(o.ts),
+  775     'Produits: '+items,
+  776     'Paiement: '+(o.payment||'-'),
+  777     'Total: '+fmtEUR((o.totals&&o.totals.cash)||0)+' (cash) • '+fmtEUR((o.totals&&o.totals.crypto)||0)+' (crypto)',
+  778     'Adresse: '+(name?name+', ':'')+addr
+  779   ].join('
+  780 ');
+  781 }
+  782 function aggregate(list){let cash=0, crypto=0, count=0;for(let i=0;i<list.length;i++){const o=list[i];if(!o) continue;count++;if(o.payment==="cash"){cash+=Number(o?.totals?.cash||0);}else if(o.payment==="crypto"){crypto+=Number(o?.totals?.crypto||0);}}return {cash,crypto,count};}
+  783 async function handleReports(chatId, kind){
+  784   const labels = {today:'Aujourd’hui', week:'Semaine', month:'Mois', year:'Année'};
+  785   const since = rangeTs(kind);
+  786   const v2 = (await kv.get('orders_v2')) || [];
+  787   const v1 = (await kv.get('orders')) || [];
+  788   const seen = new Set();
+  789   const all = [...v1, ...v2].filter(o => {
+  790     if (!o || !o.id) return true;
+  791     if (seen.has(o.id)) return false;
+  792     seen.add(o.id);
+  793     return true;
+  794   });
+  795   const list = all.filter(o => Number(o.ts||0) >= since).sort((a,b)=>Number(b.ts)-Number(a.ts));
+  796 
+  797   if (!list.length){
+  798     await send(`Aucune commande pour la période « ${labels[kind]||kind} ».`, chatId, adminReportsKb());
+  799     return;
+  800   }
+  801 
+  802   const agg = aggregate(list);
+  803   const header =
+  804     `<b>📈 Rapports — ${labels[kind]||kind}</b>\n` +
+  805     `Total commandes: ${agg.count}\n` +
+  806     `CA: ${fmtEUR(agg.cash)} (cash) • ${fmtEUR(agg.crypto)} (crypto)\n`;
+  807 
+  808   let msg = header + '\n' + list.map(orderLine).join('\n\n');
+  809 
+  810   const MAX = 3800;
+  811   if (msg.length > MAX) {
+  812     let out = header + '\n';
+  813     for (const line of list.map(orderLine)) {
+  814       if (out.length + line.length + 2 > MAX) break;
+  815       out += line + '\n\n';
+  816     }
+  817     msg = out.trimEnd() + '\n\n…(tronqué)';
+  818   }
+  819 
+  820   await send(msg, chatId, adminReportsKb());
+  821 }
+  822 // === end Reports block ===
+  823 
+  824 // --- Patch helpers (data only) ---
+  825 async function handleVersion(chatId){
+  826   try {
+  827     const codeV = process.env.APP_VERSION || 'n/a';
+  828     const dataV = await currentDataVersion();
+  829     await send(`Code: ${codeV}\nData: ${dataV}`, chatId);
+  830   } catch(e){ await send('Version error: '+(e&&e.message||e), chatId); }
+  831 }
+  832 async function handleRollback(chatId, adminId, target){
+  833   try {
+  834     const r = await rollback(target, String(adminId));
+  835     await send(`Rollback OK → ${r.restoredTo}`, chatId);
+  836   } catch(e){ await send('Rollback FAIL: '+(e&&e.message||e), chatId); }
+  837 }
+  838 async function handlePatchDocument(msg){
+  839   const chatId = msg.chat.id; const userId = msg.from.id;
+  840   try {
+  841     const settings = (await kv.get('settings')) || {};
+  842     if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId); return; }
+  843 
+  844     if (!msg.document || !msg.document.file_id) {
+  845       await send('Patch error: document manquant.', chatId);
+  846       return;
+  847     }
+  848 
+  849     await send('Récupération du fichier…', chatId);
+  850     const fid = msg.document.file_id;
+  851     const url = await getFileUrl(fid);
+  852     if (!url) { await send('Patch error: URL de fichier introuvable.', chatId); return; }
+  853 
+  854     const buf = await axios.get(url, { responseType:'arraybuffer' }).then(r=>Buffer.from(r.data));
+  855     let manifest;
+  856     try { manifest = JSON.parse(buf.toString('utf8')); }
+  857     catch(e){ await send('Patch error: JSON invalide ('+(e && e.message || e)+')', chatId); return; }
+  858 
+  859     await send('Preview en cours…', chatId);
+  860     let p;
+  861     try {
+  862       p = await preview(manifest, PATCH_SECRET);
+  863     } catch(e){
+  864       await send('Patch error (preview): '+prettyErr(e), chatId);
+  865       return;
+  866     }
+  867 
+  868     await send(
+  869       'PREVIEW OK\n'
+  870       + (p.summary||'') + '\n'
+  871       + 'Current: '+(p.currentVersion||'?')+'\n'
+  872       + 'Keys: '+((p.willWriteKeys||[]).join(', ')||'(aucune)'),
+  873       chatId
+  874     , null, true);
+  875 
+  876     await send('Application du patch…', chatId);
+  877     try {
+  878       await apply(manifest, String(userId), PATCH_SECRET);
+  879     } catch(e){
+  880       await send('Patch error (apply): '+prettyErr(e), chatId);
+  881       return;
+  882     }
+  883 
+  884     try {
+  885       const hist = (await kv.get('patch:history')) || [];
+  886       hist.push({ at: Date.now(), from: (p && p.currentVersion)||null, to: manifest.version||null, by: String(userId) });
+  887       await kv.set('patch:history', hist);
+  888     } catch(_) {}
+  889 
+  890     await send('Patch applied. Backup: backup:'+String(manifest.version||'?'), chatId);
