@@ -543,14 +543,7 @@ async function handleAdminFlowStep(msg, sess){
   // === ADD PRODUCT (with variants option) ===
   if (sess.flow==='add_product'){
     if (sess.step==='name' && msg.text){ sess.payload.name=msg.text.trim(); sess.step='desc'; await adminSessionSet(userId,sess); await send('Description ?', chatId); return; }
-    if (sess.step==='desc' && msg.text){
-  sess.payload.description = msg.text.trim();
-  // Étape variantes JSON (ou "aucune" pour garder unité/prix uniques)
-  sess.step='variants_json_add'; await adminSessionSet(userId, sess);
-  await send('Envoie les variantes au format JSON (ex: [\n  {"label":"10g","price_cash":5,"price_crypto":6}\n])\nOu tape "aucune" pour utiliser unité/prix uniques.', chatId);
-  return;
-}
-
+    if (sess.step==='desc' && msg.text){ sess.payload.description=msg.text.trim(); sess.step='ask_variants'; await adminSessionSet(userId,sess); await send('Utiliser des variantes ? (oui/non)', chatId); return; }
     if (sess.step==='ask_variants' && msg.text){
       const t = msg.text.trim().toLowerCase();
       if (['oui','yes','o','y'].includes(t)){ sess.step='variants'; await adminSessionSet(userId,sess); await send('Envoie des variantes, une par ligne, au format: <b>label;cash;crypto</b>\nEx:\n10g;5;6\n50g;20;24\n\nTape "fin" quand terminé.', chatId); return; }
@@ -586,29 +579,7 @@ async function handleAdminFlowStep(msg, sess){
       await send(`Variantes ajoutées: ${ok}${bad?` — ignorées: ${bad}`:''}\nTu peux en rajouter ou taper "fin".`, chatId);
       return;
     }
-    
-    // Variantes (JSON) — inséré avant 'media'
-    if (sess.step==='variants_json_add' && msg.text){
-      const t = String(msg.text).trim();
-      if (t.toLowerCase()==='aucune'){
-        sess.step='unit'; await adminSessionSet(userId,sess); await send('Unité (ex: 1u = 100g) ?', chatId); return;
-      }
-      try{
-        const arr = JSON.parse(t);
-        if(!Array.isArray(arr)) throw new Error('Array attendu');
-        sess.payload.quantities = arr.map(v=>({
-          label:String(v?.label||''),
-          price_cash:Number(v?.price_cash||0),
-          price_crypto:Number(v?.price_crypto||0)
-        })).filter(v=>v.label);
-        // variantes valides: on saute unité/prix/crypto et on va aux médias
-        sess.step='media'; await adminSessionSet(userId,sess);
-        await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia()); return;
-      }catch(e){
-        await send('JSON invalide: '+(e&&e.message||e), chatId); return;
-      }
-    }
-if (sess.step==='media'){
+    if (sess.step==='media'){
       let added=0;
       if (msg.photo?.length){ const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id); if (url){ (sess.payload.media ||= []).push({type:'photo', url}); added++; } }
       if (msg.video){ const url=await getFileUrl(msg.video.file_id); if (url){ (sess.payload.media ||= []).push({type:'video', url}); added++; } }
@@ -647,14 +618,7 @@ if (sess.step==='media'){
         const products=(await kv.get('products'))||[];
         const idx = products.findIndex(p=>p.id===sess.payload.id);
         if (idx<0){ await send('Introuvable.', chatId); return; }
-        
-    // Raccourci texte pour variantes
-    if (sess.step==='choose_field' && msg.text && String(msg.text).trim().toLowerCase()==='/variants'){
-      sess.step='variants_json'; await adminSessionSet(userId, sess);
-      await send('Colle le JSON des variantes (ex: [{"label":"10g","price_cash":5,"price_crypto":6}]).', chatId, kbConfirm());
-      return;
-    }
-  products[idx].quantities = clean;
+        products[idx].quantities = clean;
         await kv.set('products', products);
         await adminSessionClear(userId); await send('✅ Variantes mises à jour.', chatId, adminProductsKb()); return;
       }catch(e){
@@ -662,27 +626,6 @@ if (sess.step==='media'){
         return;
       }
     }
-    // --- Variantes (JSON) ---
-    if (sess.step==='variants_json' && msg.text){
-      try{
-        const arr = JSON.parse(String(msg.text).trim());
-        if(!Array.isArray(arr)) throw new Error('Array attendu');
-        const products=(await kv.get('products'))||[];
-        const idx = products.findIndex(p=>p.id===sess.payload.id);
-        if (idx<0){ await send('Introuvable.', chatId); return; }
-        products[idx].quantities = arr.map(v=>({
-          label: String(v?.label||''),
-          price_cash: Number(v?.price_cash||0),
-          price_crypto: Number(v?.price_crypto||0)
-        })).filter(v=>v.label);
-        await kv.set('products', products);
-        await adminSessionClear(userId);
-        await send('✅ Variantes mises à jour.', chatId, adminProductsKb()); return;
-      }catch(e){
-        await send('JSON invalide: '+(e&&e.message||e), chatId); return;
-      }
-    }
-  
     if (sess.step==='field_val' && msg.text){
       const products=(await kv.get('products'))||[];
       const idx = products.findIndex(p=>p.id===sess.payload.id);

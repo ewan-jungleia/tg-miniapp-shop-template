@@ -586,29 +586,7 @@ async function handleAdminFlowStep(msg, sess){
       await send(`Variantes ajoutées: ${ok}${bad?` — ignorées: ${bad}`:''}\nTu peux en rajouter ou taper "fin".`, chatId);
       return;
     }
-    
-    // Variantes (JSON) — inséré avant 'media'
-    if (sess.step==='variants_json_add' && msg.text){
-      const t = String(msg.text).trim();
-      if (t.toLowerCase()==='aucune'){
-        sess.step='unit'; await adminSessionSet(userId,sess); await send('Unité (ex: 1u = 100g) ?', chatId); return;
-      }
-      try{
-        const arr = JSON.parse(t);
-        if(!Array.isArray(arr)) throw new Error('Array attendu');
-        sess.payload.quantities = arr.map(v=>({
-          label:String(v?.label||''),
-          price_cash:Number(v?.price_cash||0),
-          price_crypto:Number(v?.price_crypto||0)
-        })).filter(v=>v.label);
-        // variantes valides: on saute unité/prix/crypto et on va aux médias
-        sess.step='media'; await adminSessionSet(userId,sess);
-        await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia()); return;
-      }catch(e){
-        await send('JSON invalide: '+(e&&e.message||e), chatId); return;
-      }
-    }
-if (sess.step==='media'){
+    if (sess.step==='media'){
       let added=0;
       if (msg.photo?.length){ const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id); if (url){ (sess.payload.media ||= []).push({type:'photo', url}); added++; } }
       if (msg.video){ const url=await getFileUrl(msg.video.file_id); if (url){ (sess.payload.media ||= []).push({type:'video', url}); added++; } }

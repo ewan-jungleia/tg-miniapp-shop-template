@@ -425,19 +425,22 @@ async function onCallbackQuery(cbq){
     }
   }
   if (data==='back'){
-    const sess=await adminSessionGet(userId);
     if (sess?.flow==='add_product'){
-      if (sess.step==='confirm'){ await adminSessionSet(userId,{...sess, step:'media'}); await send('Envoie 1 ou plusieurs médias, puis ➡️ Terminer.', chatId, kbMedia()); }
-      else if (sess.step==='media'){
-        if (Array.isArray(sess.payload.quantities) && sess.payload.quantities.length){
-          await adminSessionSet(userId,{...sess, step:'variants'}); await send('Ajoute des variantes (label;cash;crypto) — "fin" pour terminer.', chatId);
-        } else {
-          await adminSessionSet(userId,{...sess, step:'ask_variants'}); await send('Utiliser des variantes ? (oui/non)', chatId);
-        }
+      const hasVar = Array.isArray(sess?.payload?.quantities) && sess.payload.quantities.length>0;
+      if (sess.step===|onfirm'){
+        if (hasVar){ await adminSessionSet(userId,{...sess, step:'media'}); await send(zjoute/retire des médias ou ➡️ Terminer.', chatId, kbMedia()); }
+        else { await adminSessionSet(userId,{...sess, step:|rypto'}); await send('Prix crypto (€) ?', chatId); }
+      } else if (sess.step===|rypto'){
+        await adminSessionSet(userId,{...sess, step:'price'}); await send('Prix cash (€) ?', chatId);
+      } else if (sess.step==='price'){
+        await adminSessionSet(userId,{...sess, step:'unit'}); await send('Unité (ex: 1u = 100g) ?', chatId);
+      } else if (sess.step==='unit'){
+        await adminSessionSet(userId,{...sess, step:�sc'}); await send(�scription ?', chatId);
+      } else if (sess.step==='variants_json_add'){
+        await adminSessionSet(userId,{...sess, step:�sc'}); await send(�scription ?', chatId);
+      } else if (sess.step===�sc'){
+        await adminSessionSet(userId,{...sess, step:'name'}); await send('Nom du produit ?', chatId);
       }
-      else if (sess.step==='variants'){ await adminSessionSet(userId,{...sess, step:'ask_variants'}); await send('Utiliser des variantes ? (oui/non)', chatId); }
-      else if (sess.step==='ask_variants'){ await adminSessionSet(userId,{...sess, step:'desc'}); await send('Description ?', chatId); }
-      else if (sess.step==='desc'){ await adminSessionSet(userId,{...sess, step:'name'}); await send('Nom du produit ?', chatId); }
       return;
     }
   }
@@ -543,14 +546,7 @@ async function handleAdminFlowStep(msg, sess){
   // === ADD PRODUCT (with variants option) ===
   if (sess.flow==='add_product'){
     if (sess.step==='name' && msg.text){ sess.payload.name=msg.text.trim(); sess.step='desc'; await adminSessionSet(userId,sess); await send('Description ?', chatId); return; }
-    if (sess.step==='desc' && msg.text){
-  sess.payload.description = msg.text.trim();
-  // Étape variantes JSON (ou "aucune" pour garder unité/prix uniques)
-  sess.step='variants_json_add'; await adminSessionSet(userId, sess);
-  await send('Envoie les variantes au format JSON (ex: [\n  {"label":"10g","price_cash":5,"price_crypto":6}\n])\nOu tape "aucune" pour utiliser unité/prix uniques.', chatId);
-  return;
-}
-
+    if (sess.step==='desc' && msg.text){ sess.payload.description=msg.text.trim(); sess.step='ask_variants'; await adminSessionSet(userId,sess); await send('Utiliser des variantes ? (oui/non)', chatId); return; }
     if (sess.step==='ask_variants' && msg.text){
       const t = msg.text.trim().toLowerCase();
       if (['oui','yes','o','y'].includes(t)){ sess.step='variants'; await adminSessionSet(userId,sess); await send('Envoie des variantes, une par ligne, au format: <b>label;cash;crypto</b>\nEx:\n10g;5;6\n50g;20;24\n\nTape "fin" quand terminé.', chatId); return; }
@@ -586,29 +582,7 @@ async function handleAdminFlowStep(msg, sess){
       await send(`Variantes ajoutées: ${ok}${bad?` — ignorées: ${bad}`:''}\nTu peux en rajouter ou taper "fin".`, chatId);
       return;
     }
-    
-    // Variantes (JSON) — inséré avant 'media'
-    if (sess.step==='variants_json_add' && msg.text){
-      const t = String(msg.text).trim();
-      if (t.toLowerCase()==='aucune'){
-        sess.step='unit'; await adminSessionSet(userId,sess); await send('Unité (ex: 1u = 100g) ?', chatId); return;
-      }
-      try{
-        const arr = JSON.parse(t);
-        if(!Array.isArray(arr)) throw new Error('Array attendu');
-        sess.payload.quantities = arr.map(v=>({
-          label:String(v?.label||''),
-          price_cash:Number(v?.price_cash||0),
-          price_crypto:Number(v?.price_crypto||0)
-        })).filter(v=>v.label);
-        // variantes valides: on saute unité/prix/crypto et on va aux médias
-        sess.step='media'; await adminSessionSet(userId,sess);
-        await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia()); return;
-      }catch(e){
-        await send('JSON invalide: '+(e&&e.message||e), chatId); return;
-      }
-    }
-if (sess.step==='media'){
+    if (sess.step==='media'){
       let added=0;
       if (msg.photo?.length){ const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id); if (url){ (sess.payload.media ||= []).push({type:'photo', url}); added++; } }
       if (msg.video){ const url=await getFileUrl(msg.video.file_id); if (url){ (sess.payload.media ||= []).push({type:'video', url}); added++; } }
@@ -633,337 +607,3 @@ if (sess.step==='media'){
         [{text:'Unité (legacy)', callback_data:'admin:edit_field:unit'}],
         [{text:'Prix cash (legacy)', callback_data:'admin:edit_field:price_cash'}, {text:'Prix crypto (legacy)', callback_data:'admin:edit_field:price_crypto'}],
         [{text:'Médias', callback_data:'admin:edit_field:media'}],
-        [{text:'Annuler', callback_data:'cancel'}]
-      ];
-      await send(`Modifier <b>${found.name}</b> (${found.id}) — choisis le champ :`, chatId, kb);
-      return;
-    }
-    if (sess.step==='variants_json' && msg.text){
-      try{
-        const arr = JSON.parse(msg.text.trim());
-        if (!Array.isArray(arr)) throw new Error('JSON attendu: tableau');
-        const clean = arr.map(v=>({ label:String(v?.label||''), price_cash:Number(v?.price_cash||0), price_crypto:Number(v?.price_crypto||0) }))
-                        .filter(v=>v.label && isFinite(v.price_cash) && isFinite(v.price_crypto));
-        const products=(await kv.get('products'))||[];
-        const idx = products.findIndex(p=>p.id===sess.payload.id);
-        if (idx<0){ await send('Introuvable.', chatId); return; }
-        
-    // Raccourci texte pour variantes
-    if (sess.step==='choose_field' && msg.text && String(msg.text).trim().toLowerCase()==='/variants'){
-      sess.step='variants_json'; await adminSessionSet(userId, sess);
-      await send('Colle le JSON des variantes (ex: [{"label":"10g","price_cash":5,"price_crypto":6}]).', chatId, kbConfirm());
-      return;
-    }
-  products[idx].quantities = clean;
-        await kv.set('products', products);
-        await adminSessionClear(userId); await send('✅ Variantes mises à jour.', chatId, adminProductsKb()); return;
-      }catch(e){
-        await send('JSON invalide: '+String(e&&e.message||e), chatId, kbConfirm());
-        return;
-      }
-    }
-    // --- Variantes (JSON) ---
-    if (sess.step==='variants_json' && msg.text){
-      try{
-        const arr = JSON.parse(String(msg.text).trim());
-        if(!Array.isArray(arr)) throw new Error('Array attendu');
-        const products=(await kv.get('products'))||[];
-        const idx = products.findIndex(p=>p.id===sess.payload.id);
-        if (idx<0){ await send('Introuvable.', chatId); return; }
-        products[idx].quantities = arr.map(v=>({
-          label: String(v?.label||''),
-          price_cash: Number(v?.price_cash||0),
-          price_crypto: Number(v?.price_crypto||0)
-        })).filter(v=>v.label);
-        await kv.set('products', products);
-        await adminSessionClear(userId);
-        await send('✅ Variantes mises à jour.', chatId, adminProductsKb()); return;
-      }catch(e){
-        await send('JSON invalide: '+(e&&e.message||e), chatId); return;
-      }
-    }
-  
-    if (sess.step==='field_val' && msg.text){
-      const products=(await kv.get('products'))||[];
-      const idx = products.findIndex(p=>p.id===sess.payload.id);
-      if (idx<0){ await send('Introuvable.', chatId); return; }
-      const field = sess.payload.field;
-      const val = msg.text.trim();
-      const p = products[idx];
-      if (field==='price_cash' || field==='price_crypto'){ p[field] = Number(val.replace(',','.'))||0; }
-      else { p[field] = val; }
-      products[idx]=p; await kv.set('products', products);
-      await adminSessionClear(userId); await send('✅ Produit modifié.', chatId, adminProductsKb()); return;
-    }
-    if (sess.step==='media'){
-      let added=0;
-      if (msg.photo?.length){ const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id); if (url){ (sess.payload.newMedia ||= []).push({type:'photo', url}); added++; } }
-      if (msg.video){ const url=await getFileUrl(msg.video.file_id); if (url){ (sess.payload.newMedia ||= []).push({type:'video', url}); added++; } }
-      if (added>0){ await adminSessionSet(userId, sess); await send(`Média ajouté. Nouveaux en attente: ${(sess.payload.newMedia||[]).length}\nTu peux en ajouter d’autres ou ➡️ Terminer.`, chatId, kbMedia()); }
-      return;
-    }
-  }
-
-  // === DELETE PRODUCT ===
-  if (sess.flow==='delete_product'){
-    if (sess.step==='ask' && msg.text){
-      const q=msg.text.trim().toLowerCase(); const products=(await kv.get('products'))||[];
-      const found=products.find(x=>x.id.toLowerCase()===q || x.name.toLowerCase()===q);
-      if (!found){ await send('Introuvable. Réessaie avec ID ou nom exact.', chatId); return; }
-      await adminSessionSet(userId,{ flow:'delete_product', step:'confirm', payload:{ id:found.id, name:found.name } });
-      await send(`Supprimer <b>${found.name}</b> (${found.id}) ?`, chatId, kbConfirm()); return;
-    }
-  }
-
-  // === TEXTES ===
-  if (sess.flow==='set_description' && sess.step==='text' && msg.text){
-    const settings=(await kv.get('settings'))||{}; settings.description=msg.text; await kv.set('settings', settings);
-    await adminSessionClear(userId); await send('✅ Description mise à jour.', chatId, adminTextsKb()); return;
-  }
-  if (sess.flow==='set_faq' && sess.step==='text' && msg.text){
-    const settings=(await kv.get('settings'))||{}; settings.faq=msg.text; await kv.set('settings', settings);
-    await adminSessionClear(userId); await send('✅ FAQ mise à jour.', chatId, adminTextsKb()); return;
-  }
-
-  // === BRANDING ===
-  if (sess.flow==='set_logo' && sess.step==='wait_media'){
-    if (msg.photo?.length){
-      const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id);
-      if (url){ const settings=(await kv.get('settings'))||{}; settings.logoUrl=url; await kv.set('settings', settings); await adminSessionClear(userId); await send('✅ Logo mis à jour.', chatId, adminBrandingKb()); return; }
-    }
-    await send('Envoie une photo pour le logo.', chatId); return;
-  }
-  if (sess.flow==='set_bg' && sess.step==='wait_media'){
-    if (msg.photo?.length){
-      const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id);
-      if (url){ const settings=(await kv.get('settings'))||{}; settings.bgUrl=url; await kv.set('settings', settings); await adminSessionClear(userId); await send('✅ Fond d’écran mis à jour.', chatId, adminBrandingKb()); return; }
-    }
-    await send('Envoie une photo pour le fond d’écran.', chatId); return;
-  }
-  if (sess.flow==='set_name' && sess.step==='ask' && msg.text){
-    const settings=(await kv.get('settings'))||{}; settings.shopName=msg.text.trim(); await kv.set('settings', settings);
-    await adminSessionClear(userId); await send('✅ Nom de la boutique mis à jour.', chatId, adminBrandingKb()); return;
-  }
-
-  // === CHANNELS ===
-  if (sess.flow==='channels' && sess.step==='menu' && msg.text){
-    const settings=(await kv.get('settings'))||{}; settings.channels = Array.isArray(settings.channels)?settings.channels:[];
-    const t = msg.text.trim();
-    if (t.toLowerCase().startsWith('supprimer ')){
-      const ch = t.slice(10).trim();
-      settings.channels = settings.channels.filter(c=>c!==ch);
-      await kv.set('settings', settings);
-      await send(`Supprimé: ${ch}\nActuels: ${settings.channels.join(', ')||'(aucun)'}`, chatId);
-    } else if (t.startsWith('@')) {
-      if (!settings.channels.includes(t)) settings.channels.push(t);
-      await kv.set('settings', settings);
-      await send(`Ajouté: ${t}\nActuels: ${settings.channels.join(', ')}`, chatId);
-    } else {
-      await send('Format inconnu. Envoie @canal pour ajouter, ou "supprimer @canal".', chatId);
-    }
-    return;
-  }
-
-  // === CONTACT ===
-  if (sess.flow==='set_contact' && sess.step==='ask' && msg.text){
-    const settings=(await kv.get('settings'))||{}; settings.contactUsername=msg.text.replace(/^@/,''); await kv.set('settings', settings);
-    await adminSessionClear(userId); await send('✅ Contact mis à jour.', chatId, adminContactKb()); return;
-  }
-
-  // === ADMINS ===
-  if (sess.flow==='admins' && sess.step==='add' && msg.text){
-    const id = String(msg.text.trim());
-    const settings=(await kv.get('settings'))||{}; settings.admins = Array.isArray(settings.admins)?settings.admins:[];
-    if (!settings.admins.includes(id)) settings.admins.push(id);
-    await kv.set('settings', settings);
-    await adminSessionClear(userId); await send('✅ Admin ajouté.', chatId, adminAdminsKb()); return;
-  }
-  if (sess.flow==='admins' && sess.step==='remove' && msg.text){
-    const id = String(msg.text.trim());
-    const settings=(await kv.get('settings'))||{}; settings.admins = (settings.admins||[]).filter(x=>x!==id);
-    await kv.set('settings', settings);
-    await adminSessionClear(userId); await send('✅ Admin retiré.', chatId, adminAdminsKb()); return;
-  }
-}
-
-/** === Rapports (menu + helpers) === **/
-function adminReportsKb(){
-  return [
-    [{ text:'Aujourdhui', callback_data:'admin:reports:range:today' }],
-    [{ text:'Semaine',    callback_data:'admin:reports:range:week'  }],
-    [{ text:'Mois',       callback_data:'admin:reports:range:month' }],
-    [{ text:'Annee',      callback_data:'admin:reports:range:year'  }],
-    [{ text:'Retour',     callback_data:'admin:root' }]
-  ];
-}
-function startOfToday(){const tz='Europe/Paris';const now=new Date();const local=new Date(now.toLocaleString('en-US',{timeZone:tz}));local.setHours(0,0,0,0);const offset=local.getTime()-new Date(local.toLocaleString('en-US',{timeZone:'UTC'})).getTime();return local.getTime()-offset;}
-function startOfWeek(){const tz='Europe/Paris';const now=new Date();const local=new Date(now.toLocaleString('en-US',{timeZone:tz}));const day=(local.getDay()+6)%7;local.setHours(0,0,0,0);local.setDate(local.getDate()-day);const offset=local.getTime()-new Date(local.toLocaleString('en-US',{timeZone:'UTC'})).getTime();return local.getTime()-offset;}
-function startOfMonth(){const tz='Europe/Paris';const now=new Date();const local=new Date(now.toLocaleString('en-US',{timeZone:tz}));local.setHours(0,0,0,0);local.setDate(1);const offset=local.getTime()-new Date(local.toLocaleString('en-US',{timeZone:'UTC'})).getTime();return local.getTime()-offset;}
-function startOfYear(){const tz='Europe/Paris';const now=new Date();const local=new Date(now.toLocaleString('en-US',{timeZone:tz}));local.setHours(0,0,0,0);local.setMonth(0,1);const offset=local.getTime()-new Date(local.toLocaleString('en-US',{timeZone:'UTC'})).getTime();return local.getTime()-offset;}
-function rangeTs(kind){
-  if (kind==='today') return startOfToday();
-  if (kind==='week')  return startOfWeek();
-  if (kind==='month') return startOfMonth();
-  if (kind==='year')  return startOfYear();
-  return 0;
-}
-function fmtEUR(n){ return new Intl.NumberFormat('fr-FR',{style:'currency', currency:'EUR'}).format(Number(n||0)); }
-function fmtDate(ts){
-  try{
-    return new Date(ts||Date.now()).toLocaleString('fr-FR',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  }catch(_){ return new Date(ts||Date.now()).toISOString(); }
-}
-function orderLine(o){
-  const items=(o && o.cart && o.cart.items ? o.cart.items : []).map(i=>String(i.name)+(i.variantLabel?(' ('+i.variantLabel+')'):(i.unit?(' ('+i.unit+')'):''))+' x '+String(i.qty)).join(', ') || '(vide)';
-  const d=o && o.delivery ? o.delivery : {};
-  const name=[d.firstname||'', d.lastname||''].filter(Boolean).join(' ').trim();
-  const addr=[d.address1||'', [d.postalCode||'', d.city||''].filter(Boolean).join(' '), d.country||''].filter(Boolean).join(', ') || '-';
-  return [
-    '<b>'+o.id+'</b> • '+fmtDate(o.ts),
-    'Produits: '+items,
-    'Paiement: '+(o.payment||'-'),
-    'Total: '+fmtEUR((o.totals&&o.totals.cash)||0)+' (cash) • '+fmtEUR((o.totals&&o.totals.crypto)||0)+' (crypto)',
-    'Adresse: '+(name?name+', ':'')+addr
-  ].join('\n');
-}
-function aggregate(list){let cash=0, crypto=0, count=0;for(let i=0;i<list.length;i++){const o=list[i];if(!o) continue;count++;if(o.payment==="cash"){cash+=Number(o?.totals?.cash||0);}else if(o.payment==="crypto"){crypto+=Number(o?.totals?.crypto||0);}}return {cash,crypto,count};}
-async function handleReports(chatId, kind){
-  const labels = {today:'Aujourd’hui', week:'Semaine', month:'Mois', year:'Année'};
-  const since = rangeTs(kind);
-  const v2 = (await kv.get('orders_v2')) || [];
-  const v1 = (await kv.get('orders')) || [];
-  const seen = new Set();
-  const all = [...v1, ...v2].filter(o => {
-    if (!o || !o.id) return true;
-    if (seen.has(o.id)) return false;
-    seen.add(o.id);
-    return true;
-  });
-  const list = all.filter(o => Number(o.ts||0) >= since).sort((a,b)=>Number(b.ts)-Number(a.ts));
-
-  if (!list.length){
-    await send(`Aucune commande pour la période « ${labels[kind]||kind} ».`, chatId, adminReportsKb());
-    return;
-  }
-
-  const agg = aggregate(list);
-  const header =
-    `<b>📈 Rapports — ${labels[kind]||kind}</b>\n` +
-    `Total commandes: ${agg.count}\n` +
-    `CA: ${fmtEUR(agg.cash)} (cash) • ${fmtEUR(agg.crypto)} (crypto)\n`;
-
-  let msg = header + '\n' + list.map(orderLine).join('\n\n');
-
-  const MAX = 3800;
-  if (msg.length > MAX) {
-    let out = header + '\n';
-    for (const line of list.map(orderLine)) {
-      if (out.length + line.length + 2 > MAX) break;
-      out += line + '\n\n';
-    }
-    msg = out.trimEnd() + '\n\n…(tronqué)';
-  }
-
-  await send(msg, chatId, adminReportsKb());
-}
-// === end Reports block ===
-
-// --- Patch helpers (data only) ---
-async function handleVersion(chatId){
-  try {
-    const codeV = process.env.APP_VERSION || 'n/a';
-    const dataV = await currentDataVersion();
-    await send(`Code: ${codeV}\nData: ${dataV}`, chatId);
-  } catch(e){ await send('Version error: '+(e&&e.message||e), chatId); }
-}
-async function handleRollback(chatId, adminId, target){
-  try {
-    const r = await rollback(target, String(adminId));
-    await send(`Rollback OK → ${r.restoredTo}`, chatId);
-  } catch(e){ await send('Rollback FAIL: '+(e&&e.message||e), chatId); }
-}
-async function handlePatchDocument(msg){
-  const chatId = msg.chat.id; const userId = msg.from.id;
-  try {
-    const settings = (await kv.get('settings')) || {};
-    if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId); return; }
-
-    if (!msg.document || !msg.document.file_id) {
-      await send('Patch error: document manquant.', chatId);
-      return;
-    }
-
-    await send('Récupération du fichier…', chatId);
-    const fid = msg.document.file_id;
-    const url = await getFileUrl(fid);
-    if (!url) { await send('Patch error: URL de fichier introuvable.', chatId); return; }
-
-    const buf = await axios.get(url, { responseType:'arraybuffer' }).then(r=>Buffer.from(r.data));
-    let manifest;
-    try { manifest = JSON.parse(buf.toString('utf8')); }
-    catch(e){ await send('Patch error: JSON invalide ('+(e && e.message || e)+')', chatId); return; }
-
-    await send('Preview en cours…', chatId);
-    let p;
-    try {
-      p = await preview(manifest, PATCH_SECRET);
-    } catch(e){
-      await send('Patch error (preview): '+prettyErr(e), chatId);
-      return;
-    }
-
-    await send(
-      'PREVIEW OK\n'
-      + (p.summary||'') + '\n'
-      + 'Current: '+(p.currentVersion||'?')+'\n'
-      + 'Keys: '+((p.willWriteKeys||[]).join(', ')||'(aucune)'),
-      chatId
-    , null, true);
-
-    await send('Application du patch…', chatId);
-    try {
-      await apply(manifest, String(userId), PATCH_SECRET);
-    } catch(e){
-      await send('Patch error (apply): '+prettyErr(e), chatId);
-      return;
-    }
-
-    try {
-      const hist = (await kv.get('patch:history')) || [];
-      hist.push({ at: Date.now(), from: (p && p.currentVersion)||null, to: manifest.version||null, by: String(userId) });
-      await kv.set('patch:history', hist);
-    } catch(_) {}
-
-    await send('Patch applied. Backup: backup:'+String(manifest.version||'?'), chatId);
-    await adminSessionSet(userId,{ flow:'patch', step:'applied' });
-
-    if (manifest.upgrade === true) {
-      const ok = await triggerUpgrade();
-      await send(ok ? "Code upgrade déclenché (Vercel)" : "Upgrade non déclenché (hook absent ou erreur)", chatId);
-    } else {
-      await send('Tu peux lancer un Upgrade si besoin.', chatId, adminPatchesKb(true));
-    }
-  } catch(e){
-    await send('Patch error: '+prettyErr(e), chatId);
-  }
-}
-
-async function handleUpgrade(chatId, adminId){
-  const settings = (await kv.get('settings')) || {};
-  if (!isAdmin(adminId, settings)) { await send('Accès admin requis.', chatId); return; }
-  try {
-    const ok = await triggerUpgrade();
-    await send(ok ? '🚀 Redeploy demandé à Vercel.' : '⚠️ VERCEL_DEPLOY_HOOK_URL manquant ou erreur.', chatId);
-  } catch(e){
-    await send('Upgrade error: ' + (e && e.message || e), chatId);
-  }
-}
-
-async function triggerUpgrade(){
-  try {
-    const url = process.env.VERCEL_DEPLOY_HOOK_URL;
-    if (!url || !/^https?:\/\//.test(url)) return false;
-    await axios.post(url, {}); // simple ping
-    return true;
-  } catch(_) { return false; }
-}
