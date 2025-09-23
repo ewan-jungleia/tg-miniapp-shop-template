@@ -245,24 +245,26 @@ if (data==='admin:ap_done'){
   }
 
   // Produits — LISTE (compat variantes)
+  
   if (data==='admin:prod_list'){
     const products=(await kv.get('products'))||[];
-    if (!products.length){ await send('<b>Produits actifs</b>\n\n(aucun)', chatId, adminProductsKb()); return; }
+    if (!products.length){ await send('Produits actifs\n\n(aucun)', chatId, adminProductsKb()); return; }
     const blocks=products.map(p=>{
-      const mediaCount=(p.media||[]).length;
+      const medias = Array.isArray(p.media) ? p.media.length : 0;
       if (Array.isArray(p.quantities) && p.quantities.length){
         const qs = p.quantities.map(v=>{
           const lb=String(v?.label||''); const pc=Number(v?.price_cash||0); const pr=Number(v?.price_crypto||0);
-          return `  - ${lb} — Cash: ${pc} € • Crypto: ${pr} €`;
+          return '  - '+lb+': Cash: '+pc+' € / Crypto: '+pr+' €';
         }).join('\n');
-        return `• <b>${p.name}</b> (${p.id})\nTarifs:\n${qs}\nMédias: ${mediaCount}\nDesc: ${p.description||'-'}`;
+        return '• '+String(p.name)+' ('+String(p.id)+')\nTarifs:\n'+qs+'\nMédias: '+medias+'\nDesc: '+(p.description||'-');
       } else {
         const unit=p.unit||'1u'; const pc=Number(p.price_cash||0); const pr=Number(p.price_crypto||0);
-        return `• <b>${p.name}</b> (${p.id})\nTarif: ${unit} — ${pc} € / ${pr} €\nMédias: ${mediaCount}\nDesc: ${p.description||'-'}`;
+        return '• '+String(p.name)+' ('+String(p.id)+')\nTarif: '+unit+' — Cash: '+pc+' € / Crypto: '+pr+' €\nMédias: '+medias+'\nDesc: '+(p.description||'-');
       }
     }).join('\n\n');
-    await send(`<b>Produits actifs</b>\n\n${blocks}`, chatId, adminProductsKb()); return;
+    await send('Produits actifs\n\n'+blocks, chatId, adminProductsKb()); return;
   }
+
 
   // Produits — AJOUT
   if (data==='admin:add_product'){
@@ -375,6 +377,63 @@ if (data==='admin:ap_done'){
     await send('Envoie l’ID numérique Telegram de l’admin à retirer.', chatId); return;
   }
   // Media helpers
+
+  // === Quantités — callbacks ===
+  if (data==='admin:edit_field:quantities'){
+    const sess=await adminSessionGet(userId);
+    const products=(await kv.get('products'))||[];
+    const p=products.find(x=>x.id===sess?.payload?.id);
+    if(!p){ await send('Introuvable.', chatId); return; }
+    const qs = Array.isArray(p.quantities)?p.quantities:[];
+    const rows = qs.length ? qs.map((v,i)=>[{text:`\${v.label} — Cash: \${v.price_cash}€ / Crypto: \${v.price_crypto}€`, callback_data:'admin:qty_pick:'+i}]) : [[{text:'(aucune)', callback_data:'noop'}]];
+    const kb=[...rows, [{text:'➕ Ajouter', callback_data:'admin:qty_add'}], [{text:'⬅️ Retour', callback_data:'admin:edit_product'}]];
+    await send('Quantités :', chatId, kb); return;
+  }
+  if (data.startsWith('admin:qty_pick:')){
+    const i = Number(data.split(':').pop()||'0')|0;
+    const sess=await adminSessionGet(userId);
+    await adminSessionSet(userId,{...sess, step:'qty_menu', payload:{...(sess?.payload||{}), idx:i}});
+    const kb=[
+      [{text:'Libellé', callback_data:'admin:qty_edit_label'}],
+      [{text:'Prix cash', callback_data:'admin:qty_edit_cash'}, {text:'Prix crypto', callback_data:'admin:qty_edit_crypto'}],
+      [{text:'🗑️ Supprimer', callback_data:'admin:qty_del'}],
+      [{text:'⬅️ Retour', callback_data:'admin:edit_field:quantities'}]
+    ];
+    await send('Modifier cette variante :', chatId, kb); return;
+  }
+  if (data==='admin:qty_add'){
+    const sess=await adminSessionGet(userId);
+    await adminSessionSet(userId,{...sess, step:'qty_add_label'});
+    await send('Libellé de la nouvelle variante ?', chatId); return;
+  }
+  if (data==='admin:qty_edit_label'){
+    const sess=await adminSessionGet(userId);
+    await adminSessionSet(userId,{...sess, step:'qty_edit_label_wait'});
+    await send('Nouveau libellé ?', chatId); return;
+  }
+  if (data==='admin:qty_edit_cash'){
+    const sess=await adminSessionGet(userId);
+    await adminSessionSet(userId,{...sess, step:'qty_edit_cash_wait'});
+    await send('Nouveau prix cash (€) ?', chatId); return;
+  }
+  if (data==='admin:qty_edit_crypto'){
+    const sess=await adminSessionGet(userId);
+    await adminSessionSet(userId,{...sess, step:'qty_edit_crypto_wait'});
+    await send('Nouveau prix crypto (€) ?', chatId); return;
+  }
+  if (data==='admin:qty_del'){
+    const sess=await adminSessionGet(userId);
+    const products=(await kv.get('products'))||[];
+    const id = sess?.payload?.id, i = sess?.payload?.idx|0;
+    const idx=products.findIndex(p=>p.id===id);
+    if(idx<0){ await send('Introuvable.', chatId); return; }
+    (products[idx].quantities ||= []).splice(i,1);
+    await kv.set('products', products);
+    await send('✅ Variante supprimée.', chatId);
+    await onCallbackQuery({ message:{chat:{id:chatId}}, from:{id:userId}, data:'admin:edit_field:quantities' });
+    return;
+  }
+
   const sess=await adminSessionGet(userId);
   if (data==='more_media'){
     if (sess && (sess.flow==='add_product' || (sess.flow==='edit_product' && sess.step==='media'))) {
@@ -440,27 +499,88 @@ if (data==='admin:ap_done'){
       await send(before===products.length?'Aucun produit supprimé.':'✅ Produit supprimé.', chatId, adminProductsKb()); return;
     }
   }
+  
   if (data==='back'){
     const sess=await adminSessionGet(userId);
     if (sess?.flow==='add_product'){
-      if (sess.step==='confirm'){ await adminSessionSet(userId,{...sess, step:'media'}); await send('Envoie 1 ou plusieurs médias, puis ➡️ Terminer.', chatId, kbMedia()); }
-      else if (sess.step==='media'){
-        if (Array.isArray(sess.payload.quantities) && sess.payload.quantities.length){
-          await adminSessionSet(userId,{...sess, step:'variants'}); await send('Ajoute des variantes (label;cash;crypto) — "fin" pour terminer.', chatId);
-        } else {
-          await adminSessionSet(userId,{...sess, step:'ask_variants'}); await send('Utiliser des variantes ? (oui/non)', chatId);
-        }
-      }
-      else if (sess.step==='variants'){ await adminSessionSet(userId,{...sess, step:'ask_variants'}); await send('Utiliser des variantes ? (oui/non)', chatId); }
-      else if (sess.step==='ask_variants'){ await adminSessionSet(userId,{...sess, step:'desc'}); await send('Description ?', chatId); }
-      else if (sess.step==='desc'){ await adminSessionSet(userId,{...sess, step:'name'}); await send('Nom du produit ?', chatId); }
-      return;
+      if (sess.step==='qty_label'){ await adminSessionSet(userId,{...sess, step:'desc'}); await send('Description ?', chatId); return; }
+      if (sess.step==='qty_cash'){ await adminSessionSet(userId,{...sess, step:'qty_label'}); await send('Libellé de la variante ?', chatId); return; }
+      if (sess.step==='qty_crypto'){ await adminSessionSet(userId,{...sess, step:'qty_cash'}); await send('Prix cash (€) ?', chatId); return; }
+      if (sess.step==='qty_more'){ await adminSessionSet(userId,{...sess, step:'qty_crypto'}); await send('Prix crypto (€) ?', chatId); return; }
+      if (sess.step==='media'){ await adminSessionSet(userId,{...sess, step:'qty_more'}); await send('Ajouter une autre variante ? (oui/non)', chatId); return; }
     }
+    return;
   }
+
+  
   if (data==='cancel'){ await adminSessionClear(userId); await send('✖️ Flow annulé.', chatId, adminRootKb()); return; }
-}
+
 
 /** ===== Messages ===== **/
+
+  // === EDIT PRODUCT — messages Quantités ===
+  {
+    const sess=await adminSessionGet(msg.from.id);
+    if (sess?.flow==='edit_product'){
+      const products=(await kv.get('products'))||[];
+
+      if (sess.step==='qty_add_label' && msg.text){
+        const t = String(msg.text).trim(); if(!t){ await send('Libellé vide.', msg.chat.id); return; }
+        await adminSessionSet(msg.from.id,{...sess, step:'qty_add_cash', payload:{...(sess.payload||{}), newLabel:t}});
+        await send(`Prix cash (€) pour "\${t}" ?`, msg.chat.id); return;
+      }
+      if (sess.step==='qty_add_cash' && msg.text){
+        const n=Number(String(msg.text).replace(',','.')); if(!isFinite(n)){ await send('Nombre invalide.', msg.chat.id); return; }
+        await adminSessionSet(msg.from.id,{...sess, step:'qty_add_crypto', payload:{...(sess.payload||{}), newCash:n}});
+        await send('Prix crypto (€) ?', msg.chat.id); return;
+      }
+      if (sess.step==='qty_add_crypto' && msg.text){
+        const n=Number(String(msg.text).replace(',','.')); if(!isFinite(n)){ await send('Nombre invalide.', msg.chat.id); return; }
+        const idx=products.findIndex(p=>p.id===sess.payload.id); if(idx<0){ await send('Introuvable.', msg.chat.id); return; }
+        (products[idx].quantities ||= []).push({ label: sess.payload.newLabel, price_cash: sess.payload.newCash, price_crypto: n });
+        await kv.set('products', products);
+        await adminSessionSet(msg.from.id,{ flow:'edit_product', step:'choose_field', payload:{ id: sess.payload.id }});
+        await send('✅ Variante ajoutée.', msg.chat.id);
+        await onCallbackQuery({ message:{chat:{id:msg.chat.id}}, from:{id:msg.from.id}, data:'admin:edit_field:quantities' });
+        return;
+      }
+
+      if (sess.step==='qty_edit_label_wait' && msg.text){
+        const id = sess?.payload?.id, i = sess?.payload?.idx|0;
+        const idx=products.findIndex(p=>p.id===id); if(idx<0){ await send('Introuvable.', msg.chat.id); return; }
+        if(!Array.isArray(products[idx].quantities)||!products[idx].quantities[i]){ await send('Introuvable.', msg.chat.id); return; }
+        products[idx].quantities[i].label = String(msg.text).trim();
+        await kv.set('products', products);
+        await adminSessionSet(msg.from.id,{ flow:'edit_product', step:'choose_field', payload:{ id }});
+        await send('✅ Libellé mis à jour.', msg.chat.id);
+        await onCallbackQuery({ message:{chat:{id:msg.chat.id}}, from:{id:msg.from.id}, data:'admin:edit_field:quantities' });
+        return;
+      }
+      if (sess.step==='qty_edit_cash_wait' && msg.text){
+        const id = sess?.payload?.id, i = sess?.payload?.idx|0;
+        const idx=products.findIndex(p=>p.id===id); if(idx<0){ await send('Introuvable.', msg.chat.id); return; }
+        if(!Array.isArray(products[idx].quantities)||!products[idx].quantities[i]){ await send('Introuvable.', msg.chat.id); return; }
+        const n=Number(String(msg.text).replace(',','.')); products[idx].quantities[i].price_cash=isFinite(n)?n:0;
+        await kv.set('products', products);
+        await adminSessionSet(msg.from.id,{ flow:'edit_product', step:'choose_field', payload:{ id }});
+        await send('✅ Prix cash mis à jour.', msg.chat.id);
+        await onCallbackQuery({ message:{chat:{id:msg.chat.id}}, from:{id:msg.from.id}, data:'admin:edit_field:quantities' });
+        return;
+      }
+      if (sess.step==='qty_edit_crypto_wait' && msg.text){
+        const id = sess?.payload?.id, i = sess?.payload?.idx|0;
+        const idx=products.findIndex(p=>p.id===id); if(idx<0){ await send('Introuvable.', msg.chat.id); return; }
+        if(!Array.isArray(products[idx].quantities)||!products[idx].quantities[i]){ await send('Introuvable.', msg.chat.id); return; }
+        const n=Number(String(msg.text).replace(',','.')); products[idx].quantities[i].price_crypto=isFinite(n)?n:0;
+        await kv.set('products', products);
+        await adminSessionSet(msg.from.id,{ flow:'edit_product', step:'choose_field', payload:{ id }});
+        await send('✅ Prix crypto mis à jour.', msg.chat.id);
+        await onCallbackQuery({ message:{chat:{id:msg.chat.id}}, from:{id:msg.from.id}, data:'admin:edit_field:quantities' });
+        return;
+      }
+    }
+  }
+
 async function onMessage(msg){
 // ---- DIAG DOC ----
   try {
@@ -557,160 +677,68 @@ async function handleAdminFlowStep(msg, sess){
   const chatId=msg.chat.id; const userId=msg.from.id;
 
   // === ADD PRODUCT (with variants option) ===
+  
   if (sess.flow==='add_product'){
-    if (sess.step==='name' && msg.text){ sess.payload.name=msg.text.trim(); sess.step='desc'; await adminSessionSet(userId,sess); await send('Description ?', chatId); return; }
-    if (sess.step==='desc' && msg.text){
-  sess.payload.description = msg.text.trim();
-  // Étape variantes JSON (ou "aucune" pour garder unité/prix uniques)
-  sess.step='variants_json_add'; await adminSessionSet(userId, sess);
-  await send('Envoie les variantes au format JSON (ex: [\n  {"label":"10g","price_cash":5,"price_crypto":6}\n])\nOu tape "aucune" pour utiliser unité/prix uniques.', chatId);
-  return;
-}
-
-    if (sess.step==='ask_variants' && msg.text){
-      const t = msg.text.trim().toLowerCase();
-      if (['oui','yes','o','y'].includes(t)){ sess.step='variants'; await adminSessionSet(userId,sess); await send('Envoie des variantes, une par ligne, au format: <b>label;cash;crypto</b>\nEx:\n10g;5;6\n50g;20;24\n\nTape "fin" quand terminé.', chatId); return; }
-      if (['non','no','n'].includes(t)){ sess.step='media'; await adminSessionSet(userId,sess); await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia()); return; }
-      await send('Réponds "oui" ou "non".', chatId); return;
+    // name -> desc -> qty_label -> qty_cash -> qty_crypto -> qty_more -> media -> confirm
+    if (sess.step==='name' && msg.text){
+      sess.payload.name = msg.text.trim();
+      sess.step='desc'; await adminSessionSet(userId,sess);
+      await send('Description ?', chatId); return;
     }
-    if (sess.step==='variants' && msg.text){
-      const t = msg.text.trim();
-      if (t.toLowerCase()==='fin'){
-        if (!(Array.isArray(sess.payload.quantities)&&sess.payload.quantities.length)){
-          await send('Aucune variante. Réponds par au moins une ligne (label;cash;crypto) ou tape "non" pour revenir sans variantes.', chatId);
-          return;
-        }
-        sess.step='media'; await adminSessionSet(userId,sess);
-        await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia()); return;
-      }
-      // Parse lines
-      const lines = t.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-      let ok=0, bad=0;
-      for (const line of lines){
-        const parts=line.split(';').map(s=>s.trim());
-        if (parts.length>=3){
-          const label=parts[0];
-          const pc=Number(parts[1].replace(',','.')); const pr=Number(parts[2].replace(',','.'));
-          if (label && isFinite(pc) && isFinite(pr)){
-            (sess.payload.quantities ||= []).push({label, price_cash:pc, price_crypto:pr});
-            ok++; continue;
-          }
-        }
-        bad++;
-      }
-      await adminSessionSet(userId,sess);
-      await send(`Variantes ajoutées: ${ok}${bad?` — ignorées: ${bad}`:''}\nTu peux en rajouter ou taper "fin".`, chatId);
+    if (sess.step==='desc' && msg.text){
+      sess.payload.description = msg.text.trim();
+      // Démarre l’assistant variantes
+      sess.payload.quantities = [];
+      sess.step='qty_label'; await adminSessionSet(userId,sess);
+      await send('Première variante — libellé (ex: 10g, boîte, 1u, …) ?', chatId);
       return;
     }
-    
-    // Variantes (JSON) — inséré avant 'media'
-    if (sess.step==='variants_json_add' && msg.text){
+    if (sess.step==='qty_label' && msg.text){
       const t = String(msg.text).trim();
-      if (t.toLowerCase()==='aucune'){
-        sess.step='unit'; await adminSessionSet(userId,sess); await send('Unité (ex: 1u = 100g) ?', chatId); return;
-      }
-      try{
-        const arr = JSON.parse(t);
-        if(!Array.isArray(arr)) throw new Error('Array attendu');
-        sess.payload.quantities = arr.map(v=>({
-          label:String(v?.label||''),
-          price_cash:Number(v?.price_cash||0),
-          price_crypto:Number(v?.price_crypto||0)
-        })).filter(v=>v.label);
-        // variantes valides: on saute unité/prix/crypto et on va aux médias
-        sess.step='media'; await adminSessionSet(userId,sess);
-        await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia()); return;
-      }catch(e){
-        await send('JSON invalide: '+(e&&e.message||e), chatId); return;
-      }
+      if (!t){ await send('Libellé vide. Réessaie.', chatId); return; }
+      sess.payload._current = { label: t, price_cash: 0, price_crypto: 0 };
+      sess.step='qty_cash'; await adminSessionSet(userId,sess);
+      await send(`Prix cash (€) pour "\${t}" ?`, chatId); return;
     }
-// Assistant variantes (ajout)
-
-if (sess.step==='v_label' && msg.text){
-
-  const t = String(msg.text).trim();
-
-  if (t.toLowerCase()==='aucune'){
-
-    // Pas de variantes -> direct médias
-
-    sess.step='media'; await adminSessionSet(userId, sess);
-
-    await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia());
-
-    return;
-
-  }
-
-  (sess.payload.quantities ||= []);
-
-  sess.payload._tmp = { label: t };
-
-  sess.step='v_cash'; await adminSessionSet(userId, sess);
-
-}
-
-if (sess.step==='v_cash' && msg.text){
-
-  const n = Number(String(msg.text).replace(',','.'));
-
-  sess.payload._tmp = Object.assign(sess.payload._tmp||{}, { price_cash: isFinite(n)?n:0 });
-
-  sess.step='v_crypto'; await adminSessionSet(userId, sess);
-
-}
-
-if (sess.step==='v_crypto' && msg.text){
-
-  const n = Number(String(msg.text).replace(',','.'));
-
-  const tmp = Object.assign(sess.payload._tmp||{}, { price_crypto: isFinite(n)?n:0 });
-
-  delete sess.payload._tmp;
-
-  (sess.payload.quantities ||= []).push({
-
-    label: String(tmp.label||''),
-
-    price_cash: Number(tmp.price_cash||0),
-
-    price_crypto: Number(n||0)
-
-  });
-
-  sess.step='v_more'; await adminSessionSet(userId, sess);
-
-  const kb=[[{text:'➕ Ajouter une autre', callback_data:'admin:ap_more'},{text:'➡️ Terminer', callback_data:'admin:ap_done'}]];
-
-  await send('Variante ajoutée. Ajouter une autre ?', chatId, kb); return;
-
-}
-
-// clics "Ajouter une autre" / "Terminer" via CallbackQuery
-
-if (sess.step==='v_more' && msg.text){
-
-  // si l'utilisateur tape "oui/non", on gère aussi
-
-  const t=String(msg.text).trim().toLowerCase();
-
-  if(['oui','o','yes','y','ajouter','+'].includes(t)){ sess.step='v_label'; await adminSessionSet(userId, sess); await send('Libellé de la variante suivante ?', chatId); 
-return; }
-
-  if(['non','n','fin','terminer','stop'].includes(t)){ sess.step='media'; await adminSessionSet(userId, sess); await send('Envoie 1 ou plusieurs <b>photos/vidéos</b>.', 
-chatId, kbMedia()); return; }
-
-}
-
-
-if (sess.step==='media'){
+    if (sess.step==='qty_cash' && msg.text){
+      const n = Number(String(msg.text).replace(',','.'));
+      if (!isFinite(n)){ await send('Nombre invalide. Entre un prix (ex: 5 ou 5,5).', chatId); return; }
+      sess.payload._current.price_cash = n;
+      const t = sess.payload._current.label;
+      sess.step='qty_crypto'; await adminSessionSet(userId,sess);
+      await send(`Prix crypto (€) pour "\${t}" ?`, chatId); return;
+    }
+    if (sess.step==='qty_crypto' && msg.text){
+      const n = Number(String(msg.text).replace(',','.'));
+      if (!isFinite(n)){ await send('Nombre invalide. Entre un prix (ex: 6 ou 6,2).', chatId); return; }
+      sess.payload._current.price_crypto = n;
+      (sess.payload.quantities ||= []).push(sess.payload._current);
+      delete sess.payload._current;
+      sess.step='qty_more'; await adminSessionSet(userId,sess);
+      await send('Ajouter une autre variante ? (oui/non)', chatId); return;
+    }
+    if (sess.step==='qty_more' && msg.text){
+      const t = String(msg.text).trim().toLowerCase();
+      if (['oui','o','yes','y'].includes(t)){
+        sess.step='qty_label'; await adminSessionSet(userId,sess);
+        await send('Libellé de la variante suivante ?', chatId); return;
+      }
+      if (!sess.payload.quantities || !sess.payload.quantities.length){
+        await send('Tu dois créer au moins une variante (réponds "oui").', chatId); return;
+      }
+      // On passe aux médias
+      sess.step='media'; await adminSessionSet(userId,sess);
+      await send('Envoie 1 ou plusieurs photos/vidéos.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia()); return;
+    }
+    if (sess.step==='media'){
       let added=0;
       if (msg.photo?.length){ const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id); if (url){ (sess.payload.media ||= []).push({type:'photo', url}); added++; } }
       if (msg.video){ const url=await getFileUrl(msg.video.file_id); if (url){ (sess.payload.media ||= []).push({type:'video', url}); added++; } }
-      if (added>0){ await adminSessionSet(userId, sess); await send(`Média ajouté. Total: ${sess.payload.media.length}\nTu peux en ajouter d’autres ou cliquer ➡️ Terminer.`, chatId, kbMedia()); }
+      if (added>0){ await adminSessionSet(userId, sess); await send(`Média ajouté. Total: \${(sess.payload.media||[]).length}\nTu peux en ajouter d’autres ou cliquer ➡️ Terminer.`, chatId, kbMedia()); }
       return;
     }
   }
+
 // === EDIT PRODUCT (assistant quantités) ===
 if (sess.flow==='edit_product'){
   const products=(await kv.get('products'))||[];
@@ -1131,4 +1159,6 @@ async function triggerUpgrade(){
     await axios.post(url, {}); // simple ping
     return true;
   } catch(_) { return false; }
+}
+
 }
