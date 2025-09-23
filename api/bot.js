@@ -26,15 +26,27 @@ function prettyErr(e){
   }catch(_){ return String(e); }
 }
 const { preview, apply, rollback, currentDataVersion } = require('./_patchEngine');
-const PATCH_SECRET = '';
+const PATCH_SECRET = process.env.PATCH_SECRET || "";
 const BOT = () => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
+console.log("DEBUG ENV", {
+  TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN ? "SET" : "MISSING",
+  TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET ? "SET" : "MISSING",
+  WEBAPP_URL: process.env.WEBAPP_URL || "missing"
+});
+console.log("DEBUG ENV", {
+  TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN ? "SET" : "MISSING",
+  TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET ? "SET" : "MISSING",
+  WEBAPP_URL: process.env.WEBAPP_URL || "missing"
+});
   return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
+console.log("DEBUG UPDATE", JSON.stringify(update, null, 2));
 };
 
 module.exports = async (req, res) => {
   try {
     if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed'); }
+console.log("DEBUG UPDATE", JSON.stringify(update, null, 2));
     const secretHeader = req.headers['x-telegram-bot-api-secret-token'];
     if (process.env.TELEGRAM_WEBHOOK_SECRET && secretHeader && secretHeader !== process.env.TELEGRAM_WEBHOOK_SECRET) {
       res.statusCode = 401; return res.end('Unauthorized');
