@@ -215,6 +215,22 @@ async function onCallbackQuery(cbq){
     }catch(e){ await send('Erreur historique: '+(e&&e.message||e), chatId); }
     return;
   }
+// Ajout produit: boutons "Ajouter autre / Terminer" pendant v_more
+if (data==='admin:ap_more'){
+  const sess = await adminSessionGet(userId);
+  if (sess?.flow==='add_product' && sess.step==='v_more'){
+    sess.step='v_label'; await adminSessionSet(userId, sess);
+    await send('Libellé de la variante suivante ?', chatId); return;
+  }
+}
+if (data==='admin:ap_done'){
+  const sess = await adminSessionGet(userId);
+  if (sess?.flow==='add_product'){
+    sess.step='media'; await adminSessionSet(userId, sess);
+    await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia()); return;
+  }
+}
+
 
   // Rapports
   if (data==='admin:cat_reports'){ await send('📈 Rapports — choisis une période :', chatId, adminReportsKb()); return; }
@@ -237,7 +253,7 @@ async function onCallbackQuery(cbq){
       if (Array.isArray(p.quantities) && p.quantities.length){
         const qs = p.quantities.map(v=>{
           const lb=String(v?.label||''); const pc=Number(v?.price_cash||0); const pr=Number(v?.price_crypto||0);
-          return `  - ${lb}: ${pc} € / ${pr} €`;
+          return `  - ${lb} — Cash: ${pc} € • Crypto: ${pr} €`;
         }).join('\n');
         return `• <b>${p.name}</b> (${p.id})\nTarifs:\n${qs}\nMédias: ${mediaCount}\nDesc: ${p.description||'-'}`;
       } else {
@@ -608,6 +624,85 @@ async function handleAdminFlowStep(msg, sess){
         await send('JSON invalide: '+(e&&e.message||e), chatId); return;
       }
     }
+// Assistant variantes (ajout)
+
+if (sess.step==='v_label' && msg.text){
+
+  const t = String(msg.text).trim();
+
+  if (t.toLowerCase()==='aucune'){
+
+    // Pas de variantes -> direct médias
+
+    sess.step='media'; await adminSessionSet(userId, sess);
+
+    await send('Envoie 1 ou plusieurs <b>photos/vidéos</b> du produit.\nQuand c’est bon : ➡️ Terminer.', chatId, kbMedia());
+
+    return;
+
+  }
+
+  (sess.payload.quantities ||= []);
+
+  sess.payload._tmp = { label: t };
+
+  sess.step='v_cash'; await adminSessionSet(userId, sess);
+
+}
+
+if (sess.step==='v_cash' && msg.text){
+
+  const n = Number(String(msg.text).replace(',','.'));
+
+  sess.payload._tmp = Object.assign(sess.payload._tmp||{}, { price_cash: isFinite(n)?n:0 });
+
+  sess.step='v_crypto'; await adminSessionSet(userId, sess);
+
+}
+
+if (sess.step==='v_crypto' && msg.text){
+
+  const n = Number(String(msg.text).replace(',','.'));
+
+  const tmp = Object.assign(sess.payload._tmp||{}, { price_crypto: isFinite(n)?n:0 });
+
+  delete sess.payload._tmp;
+
+  (sess.payload.quantities ||= []).push({
+
+    label: String(tmp.label||''),
+
+    price_cash: Number(tmp.price_cash||0),
+
+    price_crypto: Number(n||0)
+
+  });
+
+  sess.step='v_more'; await adminSessionSet(userId, sess);
+
+  const kb=[[{text:'➕ Ajouter une autre', callback_data:'admin:ap_more'},{text:'➡️ Terminer', callback_data:'admin:ap_done'}]];
+
+  await send('Variante ajoutée. Ajouter une autre ?', chatId, kb); return;
+
+}
+
+// clics "Ajouter une autre" / "Terminer" via CallbackQuery
+
+if (sess.step==='v_more' && msg.text){
+
+  // si l'utilisateur tape "oui/non", on gère aussi
+
+  const t=String(msg.text).trim().toLowerCase();
+
+  if(['oui','o','yes','y','ajouter','+'].includes(t)){ sess.step='v_label'; await adminSessionSet(userId, sess); await send('Libellé de la variante suivante ?', chatId); 
+return; }
+
+  if(['non','n','fin','terminer','stop'].includes(t)){ sess.step='media'; await adminSessionSet(userId, sess); await send('Envoie 1 ou plusieurs <b>photos/vidéos</b>.', 
+chatId, kbMedia()); return; }
+
+}
+
+
 if (sess.step==='media'){
       let added=0;
       if (msg.photo?.length){ const best=msg.photo[msg.photo.length-1]; const url=await getFileUrl(best.file_id); if (url){ (sess.payload.media ||= []).push({type:'photo', url}); added++; } }
@@ -616,6 +711,77 @@ if (sess.step==='media'){
       return;
     }
   }
+// === EDIT PRODUCT (assistant quantités) ===
+if (sess.flow==='edit_product'){
+  const products=(await kv.get('products'))||[];
+
+  // ajout variante (assistant)
+  if (sess.step==='qty_add_label' && msg.text){
+    sess.payload._new = { label:String(msg.text).trim() };
+    sess.step='qty_add_cash'; await adminSessionSet(userId, sess);
+    await send('Prix cash (€) ?', chatId); return;
+  }
+  if (sess.step==='qty_add_cash' && msg.text){
+    const n = Number(String(msg.text).replace(',','.')); 
+    sess.payload._new.price_cash = isFinite(n)?n:0;
+    sess.step='qty_add_crypto'; await adminSessionSet(userId, sess);
+    await send('Prix crypto (€) ?', chatId); return;
+  }
+  if (sess.step==='qty_add_crypto' && msg.text){
+    const n = Number(String(msg.text).replace(',','.'));
+    const id = sess?.payload?.id;
+    const idx = products.findIndex(p=>p.id===id);
+    if(idx<0){ await send('Introuvable.', chatId); return; }
+    const v = {
+      label: String(sess.payload._new?.label||''),
+      price_cash: Number(sess.payload._new?.price_cash||0),
+      price_crypto: isFinite(n)?n:0
+    };
+    delete sess.payload._new;
+    (products[idx].quantities ||= []).push(v);
+    await kv.set('products', products);
+    sess.step='qty_menu'; await adminSessionSet(userId, sess);
+    await send('✅ Variante ajoutée.', chatId);
+    await onCallbackQuery({ message:{chat:{id:chatId}}, from:{id:userId}, data:'admin:edit_field:quantities' });
+    return;
+  }
+
+  // édition variante (libellé / cash / crypto)
+  if (sess.step==='qty_edit_label_wait' && msg.text){
+    const id = sess?.payload?.id, i = sess?.payload?.idx|0;
+    const idx=products.findIndex(p=>p.id===id); if(idx<0){ await send('Introuvable.', chatId); return; }
+    if(!Array.isArray(products[idx].quantities)||!products[idx].quantities[i]){ await send('Introuvable.', chatId); return; }
+    products[idx].quantities[i].label = String(msg.text).trim();
+    await kv.set('products', products);
+    sess.step='qty_menu'; await adminSessionSet(userId, sess);
+    await send('✅ Libellé mis à jour.', chatId);
+    await onCallbackQuery({ message:{chat:{id:chatId}}, from:{id:userId}, data:'admin:edit_field:quantities' });
+    return;
+  }
+  if (sess.step==='qty_edit_cash_wait' && msg.text){
+    const id = sess?.payload?.id, i = sess?.payload?.idx|0;
+    const idx=products.findIndex(p=>p.id===id); if(idx<0){ await send('Introuvable.', chatId); return; }
+    if(!Array.isArray(products[idx].quantities)||!products[idx].quantities[i]){ await send('Introuvable.', chatId); return; }
+    const n=Number(String(msg.text).replace(',','.')); products[idx].quantities[i].price_cash=isFinite(n)?n:0;
+    await kv.set('products', products);
+    sess.step='qty_menu'; await adminSessionSet(userId, sess);
+    await send('✅ Prix cash mis à jour.', chatId);
+    await onCallbackQuery({ message:{chat:{id:chatId}}, from:{id:userId}, data:'admin:edit_field:quantities' });
+    return;
+  }
+  if (sess.step==='qty_edit_crypto_wait' && msg.text){
+    const id = sess?.payload?.id, i = sess?.payload?.idx|0;
+    const idx=products.findIndex(p=>p.id===id); if(idx<0){ await send('Introuvable.', chatId); return; }
+    if(!Array.isArray(products[idx].quantities)||!products[idx].quantities[i]){ await send('Introuvable.', chatId); return; }
+    const n=Number(String(msg.text).replace(',','.')); products[idx].quantities[i].price_crypto=isFinite(n)?n:0;
+    await kv.set('products', products);
+    sess.step='qty_menu'; await adminSessionSet(userId, sess);
+    await send('✅ Prix crypto mis à jour.', chatId);
+    await onCallbackQuery({ message:{chat:{id:chatId}}, from:{id:userId}, data:'admin:edit_field:quantities' });
+    return;
+  }
+}
+
 
   // === EDIT PRODUCT (adds variants_json) ===
   if (sess.flow==='edit_product'){
@@ -628,16 +794,15 @@ if (sess.step==='media'){
       sess.step='choose_field';
       await adminSessionSet(userId, sess);
       const kb=[
-        [{text:'Nom', callback_data:'admin:edit_field:name'}, {text:'Description', callback_data:'admin:edit_field:description'}],
-        [{text:'Variantes (JSON)', callback_data:'admin:edit_field:variants_json'}],
-        [{text:'Unité (legacy)', callback_data:'admin:edit_field:unit'}],
-        [{text:'Prix cash (legacy)', callback_data:'admin:edit_field:price_cash'}, {text:'Prix crypto (legacy)', callback_data:'admin:edit_field:price_crypto'}],
-        [{text:'Médias', callback_data:'admin:edit_field:media'}],
-        [{text:'Annuler', callback_data:'cancel'}]
-      ];
-      await send(`Modifier <b>${found.name}</b> (${found.id}) — choisis le champ :`, chatId, kb);
-      return;
-    }
+  [{text:'Nom', callback_data:'admin:edit_field:name'}, {text:'Description', callback_data:'admin:edit_field:description'}],
+  [{text:'Quantités & tarifs', callback_data:'admin:edit_field:quantities'}],
+  [{text:'Médias', callback_data:'admin:edit_field:media'}],
+  [{text:'Annuler', callback_data:'cancel'}]
+];
+await adminSessionSet(userId, sess);
+await send(`Modifier <b>${found.name}</b> (${found.id}) — choisis le champ :`, chatId, kb);
+return;
+}
     if (sess.step==='variants_json' && msg.text){
       try{
         const arr = JSON.parse(msg.text.trim());
