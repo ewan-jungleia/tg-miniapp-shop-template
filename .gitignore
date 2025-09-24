@@ -15,3 +15,5 @@ patch-*.signed.json
 backup-*.json
 .DS_Store
 *.swp
+.vercel
+.env*.local
