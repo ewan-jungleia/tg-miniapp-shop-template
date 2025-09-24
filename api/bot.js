@@ -597,6 +597,16 @@ if (data==='admin:ap_done'){
 
 
 async function onMessage(msg){
+  /* START_MINIMAL_HANDLER */
+  try{
+    if(msg&&msg.text&&String(msg.text).trim().toLowerCase().startsWith('/start')){
+      await send('✅ Bot en ligne. Envoi du menu…', msg.chat.id, null, true);
+      try{ if(typeof showMainMenu==='function') await showMainMenu(msg.chat.id, msg.from?.id); }catch(_){}
+      return;
+    }
+  }catch(e){ console.log('[DBG] START handler error:', e?.message); }
+  /* END_MINIMAL_HANDLER */
+
 // ---- DIAG DOC ----
   try {
     console.log('[BOT] onMessage keys=', Object.keys(msg||{}));
