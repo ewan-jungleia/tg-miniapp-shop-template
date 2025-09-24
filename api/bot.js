@@ -1,3 +1,4 @@
+console.log("[DBG] api/bot.js entry at", new Date().toISOString());
 // api/bot.js — v1.1.7 (variants)
 // NOTE: This file replaces legacy “unité + 2 prix” with optional “quantities[]” variants.
 // - Add Product: ask if using variants (yes/no). If yes, collect (label;cash;crypto) lines.
