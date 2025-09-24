@@ -57,7 +57,16 @@ const secretHeader = req.headers['x-telegram-bot-api-secret-token'];
     if (update.callback_query) {
       await onCallbackQuery(update.callback_query);
     } else if (update.message) {
-      await onMessage(update.message);
+  console.log("[DBG] DISPATCH message");
+      console.log("[DBG] CALL onMessage with", (function(x){try{return Object.keys(x||{});}catch(_){return "?"}}( update.message )));
+try {
+  await onMessage(update.message);
+  console.log("[DBG] RET onMessage OK");
+} catch(e) {
+  try {
+    console.log("[ERR] onMessage threw:", e?.response?.status, e?.response?.data || e?.message);
+  } catch(_) { console.log("[ERR] onMessage threw:", e?.message); }
+}
     }
     res.statusCode = 200; res.end('OK');
   } catch { res.statusCode = 200; res.end('OK'); }
@@ -596,7 +605,7 @@ if (data==='admin:ap_done'){
 
 
 
-async function onMessage(msg){
+async function onMessage(msg){ console.log("[DBG] ENTER onMessage @", __filename, "keys=", Object.keys(msg||{}));
   /* START_MINIMAL_HANDLER */
   try{
     if(msg&&msg.text&&String(msg.text).trim().toLowerCase().startsWith('/start')){
