@@ -1,0 +1,26 @@
+Vercel CLI 48.1.4
+Fetching aliases under antoines-projects-827957b0
+> aliases found under antoines-projects-827957b0 [381ms]
+  source                                                                      url                                                                           age    
+  tg-miniapp-shop-template-c2x56gat3-antoines-projects-827957b0.vercel.app    tg-miniapp-shop-template-git-cf2591-antoines-projects-827957b0.vercel.app      4d    
+  tg-miniapp-shop-template-890cz8x5r-antoines-projects-827957b0.vercel.app    tg-miniapp-shop-template-git-6daf47-antoines-projects-827957b0.vercel.app      5d    
+  tg-miniapp-shop-template-58yvbkpve-antoines-projects-827957b0.vercel.app    tg-miniapp-shop-template-black.vercel.app                                      8d    
+  tg-miniapp-shop-template-58yvbkpve-antoines-projects-827957b0.vercel.app    tg-miniapp-shop-template-antoines-projects-827957b0.vercel.app                 8d    
+  tg-miniapp-shop-template-j0hn3g7gj-antoines-projects-827957b0.vercel.app    tg-miniapp-shop-template-git-main-antoines-projects-827957b0.vercel.app        8d    
+  tg-miniapp-shop-h1dy1vwdb-antoines-projects-827957b0.vercel.app             tg-miniapp-shop-git-v111-clean-antoines-projects-827957b0.vercel.app          13d    
+  tg-miniapp-shop-yzmt-1r4b2tvwl-antoines-projects-827957b0.vercel.app        tg-miniapp-shop-yzmt-git-v111-clean-antoines-projects-827957b0.vercel.app     13d    
+  tg-miniapp-shop-yzmt-j97i2qhmf-antoines-projects-827957b0.vercel.app        tg-miniapp-shop-yzmt-git-feat-61337d-antoines-projects-827957b0.vercel.app    13d    
+  tg-miniapp-shop-3zsr5zyts-antoines-projects-827957b0.vercel.app             tg-miniapp-shop-git-feature-r-9f3a66-antoines-projects-827957b0.vercel.app    13d    
+  tg-miniapp-shop-yzmt-gkpfiwytz-antoines-projects-827957b0.vercel.app        tg-miniapp-shop-yzmt-git-feat-28f50d-antoines-projects-827957b0.vercel.app    13d    
+  tg-miniapp-shop-hyu8jndjo-antoines-projects-827957b0.vercel.app             tg-miniapp-shop-git-feature-r-afa977-antoines-projects-827957b0.vercel.app    13d    
+  tg-miniapp-shop-ln2wdnp0p-antoines-projects-827957b0.vercel.app             tg-miniapp-shop-git-feature-r-0255cb-antoines-projects-827957b0.vercel.app    13d    
+  tg-miniapp-shop-yzmt-j442a8d7g-antoines-projects-827957b0.vercel.app        tg-miniapp-shop-yzmt-git-feat-d3eaf5-antoines-projects-827957b0.vercel.app    13d    
+  tg-miniapp-shop-7eaw79y9y-antoines-projects-827957b0.vercel.app             tg-miniapp-shop-git-feature-reports-antoines-projects-827957b0.vercel.app     14d    
+  tg-miniapp-shop-yzmt-kftan3hgt-antoines-projects-827957b0.vercel.app        tg-miniapp-shop-yzmt-git-feat-4bfb1a-antoines-projects-827957b0.vercel.app    14d    
+  tg-miniapp-shop-yzmt-rhqa1wvut-antoines-projects-827957b0.vercel.app        tg-miniapp-shop-yzmt-git-feat-bf4fcc-antoines-projects-827957b0.vercel.app    14d    
+  tg-miniapp-shop-my38eg7s6-antoines-projects-827957b0.vercel.app             tg-miniapp-shop-git-feature-u-1d7ba2-antoines-projects-827957b0.vercel.app    14d    
+  tg-miniapp-shop-yzmt-o5jfoq48c-antoines-projects-827957b0.vercel.app        tg-miniapp-shop-yzmt.vercel.app                                               15d    
+  tg-miniapp-shop-yzmt-o5jfoq48c-antoines-projects-827957b0.vercel.app        tg-miniapp-shop-yzmt-antoines-projects-827957b0.vercel.app                    15d    
+  tg-miniapp-shop-yzmt-o5jfoq48c-antoines-projects-827957b0.vercel.app        tg-miniapp-shop-yzmt-git-main-antoines-projects-827957b0.vercel.app           15d    
+
+> To display the next page run `vercel alias ls --next 1757426364495`

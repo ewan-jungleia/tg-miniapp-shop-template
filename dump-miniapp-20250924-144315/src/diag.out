@@ -1,0 +1,807 @@
+=== DIAG Fri Sep 19 12:44:38 UTC 2025 UTC ===
+## PWD
+/Users/ewanlanglais/dev/tg-miniapp-shop-tmp
+## GIT
+main
+## main...origin/main
+?? diag.out
+?? diag.sh
+?? patch-in.json
+?? patch-neutral-1.1.5.json
+?? patch-reset-neutral-1.1.5.json
+?? patch-reset-neutral-1.1.6.json
+## LAST COMMITS
+f1d0f39 revert(bot): restore from stable-v1.1.6 (undo broken admin list)
+82120f1 admin(list): afficher variantes (quantities) proprement
+166330d chore: trigger redeploy (force rebuild)
+1ca6959 revert(bot): restore api/bot.js from stable-v1.1.6 (fix 500)
+87d4523 admin(list): afficher variantes (quantities) sans template literals
+c99dc40 revert(bot): restore api/bot.js from stable-v1.1.6
+7cc267b admin(list): afficher variantes (quantities) si présentes
+2d666dc order: afficher le libellé de variante dans le récap
+2cd0c53 admin(list): afficher variantes (quantities) si présentes
+56a9c88 fix(cart): lire .variantSel, fusion (id,variantLabel), qty fallback
+## TREE webapp
+total 96
+drwxr-xr-x  7 ewanlanglais  staff    224 Sep 18 19:54 .
+drwxr-xr-x  3 ewanlanglais  staff     96 Sep 16 16:45 ..
+-rw-r--r--  1 ewanlanglais  staff  21681 Sep 18 19:54 app.js
+-rw-r--r--  1 ewanlanglais  staff    343 Sep 16 16:45 cart.css
+-rw-r--r--  1 ewanlanglais  staff   7339 Sep 16 16:45 enhance.js
+-rw-r--r--  1 ewanlanglais  staff   3343 Sep 16 16:45 index.html
+-rw-r--r--  1 ewanlanglais  staff   6382 Sep 16 16:45 styles.css
+## HEAD api/bot.js
+     1	// api/bot.js
+     2	const axios = require('axios');
+     3	const { kv } = require('@vercel/kv');
+     4	// --- admin session (KV) ---
+     5	const ADMIN_SESS_PREFIX = 'admin:sess:';
+     6	async function adminSessionGet(uid){ try{ return (await kv.get(ADMIN_SESS_PREFIX+uid)) || null; }catch(_){ return null; } }
+     7	async function adminSessionSet(uid, obj){ try{ await kv.set(ADMIN_SESS_PREFIX+uid, obj); }catch(_){ } }
+     8	async function adminSessionClear(uid){ try{ await kv.del(ADMIN_SESS_PREFIX+uid); }catch(_){ } }
+     9	
+    10	
+    11	
+    12	
+    13	function prettyErr(e){
+    14	  try{
+    15	    if (e && e.response){
+    16	      const status = e.response.status;
+    17	      let payload = e.response.data;
+    18	      if (typeof payload !== 'string') payload = JSON.stringify(payload);
+    19	      if (payload && payload.length > 1200) payload = payload.slice(0,1200) + '…';
+    20	      return 'HTTP '+status+' — '+payload;
+    21	    }
+    22	    return String(e && e.message || e);
+    23	  }catch(_){ return String(e); }
+    24	}
+    25	const { preview, apply, rollback, currentDataVersion } = require('./_patchEngine');
+    26	const PATCH_SECRET = '';
+    27	const BOT = () => {
+    28	  const token = process.env.TELEGRAM_BOT_TOKEN;
+    29	  return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
+    30	};
+    31	
+    32	module.exports = async (req, res) => {
+    33	  try {
+    34	    if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed'); }
+    35	    const secretHeader = req.headers['x-telegram-bot-api-secret-token'];
+    36	    if (process.env.TELEGRAM_WEBHOOK_SECRET && secretHeader && secretHeader !== process.env.TELEGRAM_WEBHOOK_SECRET) {
+    37	      res.statusCode = 401; return res.end('Unauthorized');
+    38	    }
+    39	    const update = await readJson(req);
+    40	    try { const t = update.callback_query?'callback_query':(update.message?'message':'?'); console.log('[BOT] update type=', t, 'keys=', Object.keys(update||{})); } catch(_){}
+    41	    if (update.callback_query) {
+    42	      await onCallbackQuery(update.callback_query);
+    43	    } else if (update.message) {
+    44	      await onMessage(update.message);
+    45	    }
+    46	    res.statusCode = 200; res.end('OK');
+    47	  } catch { res.statusCode = 200; res.end('OK'); }
+    48	};
+    49	
+    50	async function readJson(req) {
+    51	  return new Promise((resolve) => {
+    52	    let data=''; req.on('data',c=>data+=c); req.on('end',()=>{ try{resolve(JSON.parse(data||'{}'))}catch{resolve({})} });
+    53	  });
+    54	}
+    55	function isAdmin(userId, settings) { const list=settings?.admins||[]; return list.includes(String(userId)); }
+    56	async function send(text, chat_id, inlineKb, plain=false){
+    57	  return BOT().post('/sendMessage',{ chat_id, text, reply_markup: inlineKb ? { inline_keyboard: inlineKb } : undefined });
+    58	}
+    59	function userHomeKb(){
+    60	  const webappUrl=process.env.WEBAPP_URL;
+    61	  return { keyboard:[ [{text:'Description'},{text:'FAQ'}], [{text:'Menu', web_app:{url:webappUrl}}] ], resize_keyboard:true };
+    62	}
+    63	async function sendHome(chatId){
+    64	  await BOT().post('/sendMessage',{ chat_id:chatId, text:'Bienvenue ! Choisis une option :', reply_markup: userHomeKb() });
+    65	}
+    66	async function getFileUrl(fileId){
+    67	  const r=await BOT().get('/getFile',{ params:{ file_id:fileId }});
+    68	  const path=r.data?.result?.file_path; const token=process.env.TELEGRAM_BOT_TOKEN;
+    69	  if (!path) return null; return `https://api.telegram.org/file/bot${token}/${path}`;
+    70	}
+    71	
+    72	/** ===== Menus Admin ===== **/
+    73	function adminRootKb(){
+    74	  return [
+    75	    [{ text:'🛒 Produits', callback_data:'admin:cat_products' }],
+    76	    [{ text:'📝 Textes', callback_data:'admin:cat_texts' }],
+    77	    [{ text:'🎨 Branding', callback_data:'admin:cat_branding' }],
+    78	    [{ text:'🔐 Accès', callback_data:'admin:cat_access' }],
+    79	    [{ text:'📦 Formulaire', callback_data:'admin:cat_form' }],
+    80	    [{ text:'📞 Contact', callback_data:'admin:cat_contact' }],
+    81	    [{ text:'👑 Admins', callback_data:'admin:cat_admins' }],
+    82	    [{ text:'📈 Rapports', callback_data:'admin:cat_reports' }],
+    83	    [{ text:'🧩 Patchs', callback_data:'admin:cat_patches' }]
+    84	  ];
+    85	}
+    86	
+    87	function adminProductsKb(){
+    88	  return [
+    89	    [{ text:'📋 Lister', callback_data:'admin:prod_list' }],
+    90	    [{ text:'➕ Ajouter', callback_data:'admin:add_product' }],
+    91	    [{ text:'✏️ Modifier', callback_data:'admin:edit_product' }],
+    92	    [{ text:'🗑️ Supprimer', callback_data:'admin:delete_product' }],
+    93	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+    94	  ];
+    95	}
+    96	function adminTextsKb(){
+    97	  return [
+    98	    [{ text:'✏️ Description', callback_data:'admin:set_description' }],
+    99	    [{ text:'✏️ FAQ', callback_data:'admin:set_faq' }],
+   100	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   101	  ];
+   102	}
+   103	function adminBrandingKb(){
+   104	  return [
+   105	    [{ text:'🖼️ Logo', callback_data:'admin:set_logo' }, { text:'🖼️ Fond', callback_data:'admin:set_bg' }],
+   106	    [{ text:'♻️ Revenir au fond par défaut', callback_data:'admin:reset_bg' }],
+   107	    [{ text:'🏷️ Nom boutique', callback_data:'admin:set_name' }],
+   108	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   109	  ];
+   110	}
+   111	function adminAccessKb(){
+   112	  return [
+   113	    [{ text:'Rendre PUBLIC', callback_data:'admin:set_access:public' }],
+   114	    [{ text:'Rendre PRIVÉ', callback_data:'admin:set_access:private' }],
+   115	    [{ text:'Canaux privés (ajouter/supprimer)', callback_data:'admin:channels_manage' }],
+   116	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   117	  ];
+   118	}
+   119	function adminFormKb(fields){
+   120	  const f=fields||{};
+   121	  return [
+   122	    [{ text:`Prénom: ${f.firstname?'✅':'❌'}`, callback_data:'admin:form_toggle:firstname' }, { text:`Nom: ${f.lastname?'✅':'❌'}`, callback_data:'admin:form_toggle:lastname' }],
+   123	    [{ text:`Adresse: ${f.address1?'✅':'❌'}`, callback_data:'admin:form_toggle:address1' }],
+   124	    [{ text:`CP: ${f.postalCode?'✅':'❌'}`, callback_data:'admin:form_toggle:postalCode' }, { text:`Ville: ${f.city?'✅':'❌'}`, callback_data:'admin:form_toggle:city' }],
+   125	    [{ text:`Pays: ${f.country?'✅':'❌'}`, callback_data:'admin:form_toggle:country' }],
+   126	    [{ text:'🔁 Réinitialiser', callback_data:'admin:form_reset' }],
+   127	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   128	  ];
+   129	}
+   130	function adminContactKb(){
+   131	  return [
+   132	    [{ text:'✏️ Contact Telegram', callback_data:'admin:set_contact' }],
+   133	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   134	  ];
+   135	}
+   136	function adminAdminsKb(){
+   137	  return [
+   138	    [{ text:'📋 Lister', callback_data:'admin:admins_list' }],
+   139	    [{ text:'➕ Ajouter', callback_data:'admin:admin_add' }, { text:'🗑️ Retirer', callback_data:'admin:admin_remove' }],
+   140	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   141	  ];
+   142	}
+   143	function kbConfirm(extra=[]) {
+   144	  return [[
+   145	    { text:'✅ Valider', callback_data:'ok' },
+   146	    { text:'🔄 Revenir', callback_data:'back' },
+   147	    { text:'✖️ Annuler', callback_data:'cancel' },
+   148	    ...extra
+   149	  ]];
+   150	}
+   151	function kbMedia(){
+   152	  return [[
+   153	    { text:'➕ Ajouter d’autres médias', callback_data:'more_media' },
+   154	    { text:'🧹 Vider médias', callback_data:'clear_media' },
+   155	    { text:'➡️ Terminer', callback_data:'finish_media' }
+   156	  ],[
+   157	    { text:'✖️ Annuler', callback_data:'cancel' }
+   158	  ]];
+   159	}
+   160	
+## TAIL api/bot.js
+     1	    msg = out.trimEnd() + '\n\n…(tronqué)';
+     2	  }
+     3	
+     4	  await send(msg, chatId, adminReportsKb());
+     5	}
+     6	// === end Reports block ===
+     7	
+     8	// --- Patch helpers (data only) ---
+     9	async function handleVersion(chatId){
+    10	  try {
+    11	    const codeV = process.env.APP_VERSION || 'n/a';
+    12	    const dataV = await currentDataVersion();
+    13	    await send(`Code: ${codeV}\nData: ${dataV}`, chatId);
+    14	  } catch(e){ await send('Version error: '+(e&&e.message||e), chatId); }
+    15	}
+    16	async function handleRollback(chatId, adminId, target){
+    17	  try {
+    18	    const r = await rollback(target, String(adminId));
+    19	    await send(`Rollback OK → ${r.restoredTo}`, chatId);
+    20	  } catch(e){ await send('Rollback FAIL: '+(e&&e.message||e), chatId); }
+    21	}
+    22	async function handlePatchDocument(msg){
+    23	  const chatId = msg.chat.id; const userId = msg.from.id;
+    24	  try {
+    25	    const settings = (await kv.get('settings')) || {};
+    26	    if (!isAdmin(userId, settings)) { await send('Accès admin requis.', chatId); return; }
+    27	
+    28	    if (!msg.document || !msg.document.file_id) {
+    29	      await send('Patch error: document manquant.', chatId);
+    30	      return;
+    31	    }
+    32	
+    33	    await send('Récupération du fichier…', chatId);
+    34	    const fid = msg.document.file_id;
+    35	    const url = await getFileUrl(fid);
+    36	    if (!url) { await send('Patch error: URL de fichier introuvable.', chatId); return; }
+    37	
+    38	    const buf = await axios.get(url, { responseType:'arraybuffer' }).then(r=>Buffer.from(r.data));
+    39	    let manifest;
+    40	    try { manifest = JSON.parse(buf.toString('utf8')); }
+    41	    catch(e){ await send('Patch error: JSON invalide ('+(e && e.message || e)+')', chatId); return; }
+    42	
+    43	    await send('Preview en cours…', chatId);
+    44	    let p;
+    45	    try {
+    46	      p = await preview(manifest, PATCH_SECRET);
+    47	    } catch(e){
+    48	      await send('Patch error (preview): '+prettyErr(e), chatId);
+    49	      return;
+    50	    }
+    51	
+    52	    await send(
+    53	      'PREVIEW OK\n'
+    54	      + (p.summary||'') + '\n'
+    55	      + 'Current: '+(p.currentVersion||'?')+'\n'
+    56	      + 'Keys: '+((p.willWriteKeys||[]).join(', ')||'(aucune)'),
+    57	      chatId
+    58	    , null, true);
+    59	
+    60	    await send('Application du patch…', chatId);
+    61	    try {
+    62	      await apply(manifest, String(userId), PATCH_SECRET);
+    63	    } catch(e){
+    64	      await send('Patch error (apply): '+prettyErr(e), chatId);
+    65	      return;
+    66	    }
+    67	
+    68	    try {
+    69	      const hist = (await kv.get('patch:history')) || [];
+    70	      hist.push({ at: Date.now(), from: (p && p.currentVersion)||null, to: manifest.version||null, by: String(userId) });
+    71	      await kv.set('patch:history', hist);
+    72	    } catch(_) {}
+    73	
+    74	    await send('Patch applied. Backup: backup:'+String(manifest.version||'?'), chatId);
+    75	    await adminSessionSet(userId,{ flow:'patch', step:'applied' });
+    76	
+    77	    if (manifest.upgrade === true) {
+    78	      const ok = await triggerUpgrade();
+    79	      await send(ok ? "Code upgrade déclenché (Vercel)" : "Upgrade non déclenché (hook absent ou erreur)", chatId);
+    80	    } else {
+    81	      await send('Tu peux lancer un Upgrade si besoin.', chatId, adminPatchesKb(true));
+    82	    }
+    83	  } catch(e){
+    84	    await send('Patch error: '+prettyErr(e), chatId);
+    85	  }
+    86	}
+    87	
+    88	async function handleUpgrade(chatId, adminId){
+    89	  const settings = (await kv.get('settings')) || {};
+    90	  if (!isAdmin(adminId, settings)) { await send('Accès admin requis.', chatId); return; }
+    91	  try {
+    92	    const ok = await triggerUpgrade();
+    93	    await send(ok ? '🚀 Redeploy demandé à Vercel.' : '⚠️ VERCEL_DEPLOY_HOOK_URL manquant ou erreur.', chatId);
+    94	  } catch(e){
+    95	    await send('Upgrade error: ' + (e && e.message || e), chatId);
+    96	  }
+    97	}
+    98	
+    99	async function triggerUpgrade(){
+   100	  try {
+   101	    const url = process.env.VERCEL_DEPLOY_HOOK_URL;
+   102	    if (!url || !/^https?:\/\//.test(url)) return false;
+   103	    await axios.post(url, {}); // simple ping
+   104	    return true;
+   105	  } catch(_) { return false; }
+   106	}
+   107	
+   108	
+   109	
+   110	function adminPatchesKb(showUpgrade){
+   111	  const base = [
+   112	    [{ text:'📥 Appliquer un patch', callback_data:'admin:patch_wait' }],
+   113	    [{ text:'📜 Historique', callback_data:'admin:patch_history' }],
+   114	    [{ text:'🧾 Version', callback_data:'admin:version' }],
+   115	    [{ text:'⬅️ Retour', callback_data:'admin:root' }]
+   116	  ];
+   117	  if (showUpgrade) base.splice(2, 0, [{ text:'🚀 Upgrade', callback_data:'admin:upgrade' }]);
+   118	  return base;
+   119	}
+   120	
+## HEAD api/order.js
+     1	// api/order.js
+     2	const axios = require('axios');
+     3	const { kv } = require('@vercel/kv');
+     4	
+     5	const BOT = () => {
+     6	  const token = process.env.TELEGRAM_BOT_TOKEN;
+     7	  return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
+     8	};
+     9	
+    10	function genOrderId() {
+    11	  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    12	  let s = '';
+    13	  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random()*chars.length)];
+    14	  return '#' + s;
+    15	}
+    16	
+    17	function totals(cart) {
+    18	  const items = cart?.items || [];
+    19	  let cash = 0, crypto = 0;
+    20	  for (const it of items) {
+    21	    const q = Number(it.qty||0);
+    22	    cash   += q * Number(it.price_cash||0);
+    23	    crypto += q * Number(it.price_crypto||0);
+    24	  }
+    25	  return { cash, crypto };
+    26	}
+    27	
+    28	module.exports = async (req, res) => {
+    29	  try {
+    30	    if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed'); }
+    31	    const body = JSON.parse(await readBody(req) || '{}');
+    32	    const { user, cart, delivery, payment } = body || {};
+    33	
+    34	    const settings = (await kv.get('settings')) || {};
+    35	    const contactUsername = settings.contactUsername || 'TonContactHumain';
+    36	
+    37	    // ID aléatoire unique
+    38	    let orderId = null;
+    39	    for (let i = 0; i < 8; i++) {
+    40	      const candidate = genOrderId();
+    41	      const exists = await kv.get(`order:${candidate}`);
+    42	      if (!exists) { orderId = candidate; await kv.set(`order:${candidate}`, { ts: Date.now() }); break; }
+    43	    }
+    44	    if (!orderId) orderId = genOrderId();
+    45	
+    46	    const sum = totals(cart);
+    47	    const text = formatOrderText(cart, delivery, payment, orderId, sum);
+    48	
+    49	    // Contact humain (@)
+    50	    await BOT().post('/sendMessage', {
+    51	      chat_id: `@${contactUsername}`, text, parse_mode:'HTML', disable_web_page_preview:true
+    52	    }).catch(()=>{});
+    53	
+    54	    // Admins
+    55	    const adminIds = Array.isArray(settings.admins) ? settings.admins : [];
+    56	    for (const adminId of new Set(adminIds.map(String))) {
+    57	      if (/^\d+$/.test(adminId)) {
+    58	        await BOT().post('/sendMessage', {
+    59	          chat_id: adminId, text, parse_mode:'HTML', disable_web_page_preview:true
+    60	        }).catch(()=>{});
+    61	      }
+    62	    }
+    63	
+    64	    // Accusé utilisateur
+    65	    if (user?.id) {
+    66	      const link = `https://t.me/${contactUsername}`;
+    67	      const ack = [
+    68	        `✅ <b>Votre commande ${orderId} a été validée !</b>`,
+    69	        `Total: ${fmtEUR(sum.cash)} (cash) • ${fmtEUR(sum.crypto)} (crypto)`,
+    70	        ``,
+    71	        `▶️ Envoyez un message au contact ci-dessous et fournissez votre <b>numéro de commande</b> :`,
+    72	        `<a href="${link}">@${contactUsername}</a>`,
+    73	        ``,
+    74	        `Le contact finalisera le paiement et le suivi de la livraison.`
+    75	      ].join('\n');
+    76	      await BOT().post('/sendMessage', {
+    77	        chat_id: user.id, text: ack, parse_mode:'HTML', disable_web_page_preview:false
+    78	      }).catch(()=>{});
+    79	    }
+    80	
+    81	    // 🔸 Persistance pour Rapports
+    82	    const orders = (await kv.get('orders_v2')) || [];
+    83	    const safeUser = user ? { id: user.id, username: user.username||'' } : null;
+    84	    orders.push({
+    85	      id: orderId,
+    86	      ts: Date.now(),
+    87	      user: safeUser,
+    88	      cart: cart || {},
+    89	      delivery: delivery || {},
+    90	      payment: payment || '',
+    91	      totals: { cash: Number(sum.cash||0), crypto: Number(sum.crypto||0) }
+    92	    });
+    93	    await kv.set('orders_v2', orders);
+    94	
+    95	    res.setHeader('Content-Type', 'application/json');
+    96	    res.statusCode = 200;
+    97	    res.end(JSON.stringify({ ok:true, contact_link:`https://t.me/${contactUsername}`, order_id:orderId }));
+    98	  } catch (e) {
+    99	    res.statusCode = 500;
+   100	    res.end('ERR_ORDER:' + e.message);
+   101	  }
+   102	};
+   103	
+   104	function formatOrderText(cart, delivery, payment, orderId, sum) {
+   105	  const d = delivery || {};
+   106	  const items = (cart?.items || []).map(it =>
+   107	    `• ${it.name}${(it.variantLabel?(' ('+it.variantLabel+')'):(it.unit?(' ('+it.unit+')'):''))} x ${it.qty} — Cash: ${it.price_cash} / Crypto: ${it.price_crypto}`
+   108	  ).join('\n');
+   109	
+   110	  const addr = [
+   111	    `${(d.firstname||'').trim()} ${(d.lastname||'').trim()}`.trim(),
+   112	    (d.address1||'').trim(),
+   113	    [d.postalCode, d.city].filter(Boolean).join(' '),
+   114	    (d.country||'').trim()
+   115	  ].filter(Boolean).join('\n');
+   116	
+   117	  return [
+   118	    `<b>Nouvelle commande ${orderId}</b>`,
+   119	    `🧺 Panier:\n${items || '(vide)'}`,
+   120	    `💳 Paiement choisi: ${payment}`,
+   121	    `💰 Total: ${fmtEUR(sum.cash)} (cash) • ${fmtEUR(sum.crypto)} (crypto)`,
+   122	    `🏠 Livraison:\n${addr}`
+   123	  ].join('\n');
+   124	}
+   125	
+   126	function fmtEUR(n){ return new Intl.NumberFormat('fr-FR',{style:'currency', currency:'EUR'}).format(Number(n||0)); }
+   127	
+   128	function readBody(req) {
+   129	  return new Promise((resolve, reject) => {
+   130	    let data = '';
+   131	    req.on('data', c => data += c);
+   132	    req.on('end', () => resolve(data));
+   133	    req.on('error', reject);
+   134	  });
+   135	}
+## HEAD public/webapp/app.js
+     1	(function(){try{
+     2	window.addEventListener('error',function(e){
+     3	  try{
+     4	    var d=document.createElement('pre');
+     5	    d.style.cssText='white-space:pre-wrap;color:#fff;background:#c00;padding:8px;position:fixed;left:0;right:0;top:0;z-index:99999;font-size:12px';
+     6	    d.textContent='JS ERROR: '+(e.message||'')+' — '+(e.filename||'')+':'+(e.lineno||'');
+     7	    document.body && document.body.appendChild(d);
+     8	  }catch(_){}
+     9	}, true);
+    10	}catch(_){}})();
+    11	const tg = window.Telegram?.WebApp;
+    12	tg?.ready?.();
+    13	
+    14	const state = {
+    15	  settings: null,
+    16	  products: [],
+    17	  cart: JSON.parse(localStorage.getItem('cart')||'{"items":[]}'),
+    18	  checkoutStep: 'cart',
+    19	};
+    20	
+    21	try{init();}catch(e){(function(){try{var d=document.createElement('pre');d.style.cssText='white-space:pre-wrap;color:#fff;background:#c00;padding:8px;position:fixed;left:0;right:0;top:0;z-index:99999;font-size:12px';d.textContent='JS ERROR: '+(e&&e.message||e)+'\n'+(e&&e.stack||'');document.body&&document.body.appendChild(d);}catch(_){alert('JS ERROR: '+(e&&e.message||e));}})();}
+    22	
+    23	async function init() {
+    24	  const res = await fetch('/api/products');
+    25	  const { settings, products } = await res.json();
+    26	  state.settings = settings || {};
+    27	  state.products = products || [];
+    28	try {
+    29	  if (Array.isArray(state.products) && state.products.length>0 && !Array.isArray(state.products[0].quantities)) {
+    30	    state.products[0].quantities = [
+    31	      {label:"10g",  price_cash:5,  price_crypto:6},
+    32	      {label:"50g",  price_cash:20, price_crypto:24},
+    33	      {label:"100g", price_cash:35, price_crypto:42}
+    34	    ];
+    35	  }
+    36	} catch(_){}
+    37	
+    38	  // Title & branding
+    39	  const logo = document.getElementById('logo');
+    40	  const logoPh = document.getElementById('logoPh');
+    41	  const title = document.getElementById('shopTitle');
+    42	  title.textContent = state.settings.shopName || 'Boutique';
+    43	
+    44	  if (state.settings.logoUrl) { logo.src = state.settings.logoUrl; logo.style.display='block'; logoPh.style.display='none'; }
+    45	  else { logo.style.display='none'; logoPh.style.display='flex'; }
+    46	
+    47	  if (state.settings.bgUrl) {
+    48	    const app = document.getElementById('app');
+    49	    app.style.backgroundImage = `url('${state.settings.bgUrl}')`;
+    50	  }
+    51	
+    52	  setupTabs();
+    53	  renderCatalog();
+    54	  renderDescFaqContact();
+    55	  hookupCartModal();
+    56	  applyDeliveryFieldsVisibility();
+    57	}
+    58	
+    59	function setupTabs() {
+    60	  document.querySelectorAll('.tabs button').forEach(btn=>{
+    61	    btn.onclick = ()=>{
+    62	      document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+    63	      btn.classList.add('active');
+    64	      document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+    65	      document.getElementById(btn.dataset.tab).classList.add('active');
+    66	    };
+    67	  });
+    68	}
+    69	
+    70	function renderDescFaqContact() {
+    71	  document.getElementById('descText').textContent = state.settings.description || '—';
+    72	  document.getElementById('faqText').textContent = state.settings.faq || '—';
+    73	  const contact = state.settings.contactUsername ? `https://t.me/${state.settings.contactUsername}` : '#';
+    74	  document.getElementById('contactBlock').innerHTML =
+    75	    state.settings.contactUsername
+    76	      ? `Contact humain : <a href="${contact}" target="_blank">@${state.settings.contactUsername}</a>`
+    77	      : `Aucun contact défini.`;
+    78	}
+    79	
+    80	function renderCatalog() {
+    81	  const root = document.getElementById('catalog');
+    82	  root.innerHTML = '';
+    83	  state.products.forEach(p=>{
+    84	    const card = document.createElement('div'); card.className='card';
+    85	
+    86	    // Galerie médias (tous)
+    87	    if (Array.isArray(p.media) && p.media.length){
+    88	      const gal = document.createElement('div'); gal.className='gallery';
+    89	      p.media.forEach(m => { const el = mediaEl(m); if (el) gal.appendChild(el); });
+    90	      card.appendChild(gal);
+    91	    }
+    92	
+    93	    const hasVariants = Array.isArray(p.quantities) && p.quantities.length>0;
+    94	    const unitInfo = (!hasVariants && p.unit) ? ` (${p.unit})` : '';
+    95	    const baseCash = fmtEUR(p.price_cash||0);
+    96	    const baseCrypto = fmtEUR(p.price_crypto||0);
+    97	
+    98	    // Bloc prix (dyn si variantes)
+    99	    let priceBlock = '';
+   100	    if (hasVariants) {
+   101	      const first = p.quantities[0] || {price_cash:0, price_crypto:0};
+   102	      priceBlock = `
+   103	        <div class="row" style="margin-left:auto; gap:16px;">
+   104	          <div>Prix cash : <span id="pc-${p.id}">${fmtEUR(first.price_cash||0)}</span></div>
+   105	          <div>Prix crypto : <span id="pr-${p.id}">${fmtEUR(first.price_crypto||0)}</span></div>
+   106	        </div>`;
+   107	    } else {
+   108	      priceBlock = `
+   109	        <div class="row" style="margin-left:auto; gap:16px;">
+   110	          <div>Prix cash : ${baseCash}</div>
+   111	          <div>Prix crypto : ${baseCrypto}</div>
+   112	        </div>`;
+   113	    }
+   114	
+   115	    // Select variantes si présent
+   116	    let variantHtml = '';
+   117	    if (hasVariants) {
+   118	      const opts = p.quantities.map((q,i)=>`<option value="${i}">${q.label} — ${fmtEUR(q.price_cash||0)} / ${fmtEUR(q.price_crypto||0)}</option>`).join('');
+   119	      variantHtml = `
+   120	        <div class="row" style="margin:8px 0;">
+   121	          <label style="margin-right:8px;">Quantité</label>
+   122	          <select class="variantSel" data-id="${p.id}">${opts}</select>
+   123	        </div>`;
+   124	    }
+   125	
+   126	    card.innerHTML += `
+   127	      <h3>${p.name}</h3>
+   128	      <div class="row">${p.description || ''}</div>
+   129	      ${variantHtml}
+   130	      <div class="row">
+   131	        ${!hasVariants ? `<div class="qty"><label>Qté${unitInfo}</label><div class="qtybox"><button type="button" class="minus" data-id="${p.id}">−</button><input type="number" min="1" value="1" data-id="${p.id}" class="qtyInput"><button type="button" class="plus" data-id="${p.id}">+</button></div></div>` : ''}
+   132	        ${priceBlock}
+   133	      </div>
+   134	      <button class="primary" data-add="${p.id}">Ajouter au panier</button>
+   135	    `;
+   136	    root.appendChild(card);
+   137	  });
+   138	
+   139	  // +/- handlers
+   140	  root.querySelectorAll('button.minus').forEach(b=>{
+   141	    b.onclick = ()=>{
+   142	      const id=b.getAttribute('data-id');
+   143	      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+   144	      const v = Math.max(1, (parseInt(input.value,10)||1) - 1);
+   145	      input.value = v;
+   146	    };
+   147	  });
+   148	  root.querySelectorAll('button.plus').forEach(b=>{
+   149	    b.onclick = ()=>{
+   150	      const id=b.getAttribute('data-id');
+   151	      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+   152	      input.value = Math.max(1, (parseInt(input.value,10)||1) + 1);
+   153	    };
+   154	  });
+   155	
+   156	  // variantes: maj prix à la volée
+   157	  root.querySelectorAll('select.variantSel').forEach(sel=>{
+   158	    sel.onchange = ()=>{
+   159	      const id = sel.getAttribute('data-id');
+   160	      const p = state.products.find(x=>x.id===id);
+   161	      if (!p) return;
+   162	      const idx = parseInt(sel.value,10)||0;
+   163	      const v = (Array.isArray(p.quantities)&&p.quantities[idx]) ? p.quantities[idx] : null;
+   164	      if (!v) return;
+   165	      const pc = document.getElementById('pc-'+id);
+   166	      const pr = document.getElementById('pr-'+id);
+   167	      if (pc) pc.textContent = fmtEUR(v.price_cash||0);
+   168	      if (pr) pr.textContent = fmtEUR(v.price_crypto||0);
+   169	    };
+   170	  });
+   171	
+   172	  // Ajouter au panier
+   173	  
+   174	  root.querySelectorAll('button[data-add]').forEach(btn=>{
+   175	    btn.onclick = ()=>{
+   176	      const id = btn.getAttribute('data-add');
+   177	      const p = state.products.find(x=>x.id===id);
+   178	
+   179	      let qty = 1; // valeur par défaut
+   180	      let price_cash = p.price_cash, price_crypto = p.price_crypto;
+   181	      let variantLabel = '';
+   182	
+   183	      const select = root.querySelector(`select.variantSel[data-id="${id}"]`);
+   184	      if (select && Array.isArray(p.quantities) && p.quantities.length>0) {
+   185	        const idx = parseInt(select.value,10)||0;
+   186	        const v = p.quantities[idx] || {};
+   187	        variantLabel = v.label || '';
+   188	        price_cash = v.price_cash || 0;
+   189	        price_crypto = v.price_crypto || 0;
+   190	      } else {
+   191	        const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+   192	        qty = Math.max(1, parseInt(input?.value,10) || 1);
+   193	      }
+   194	
+   195	      addToCart({
+   196	        id: p.id,
+   197	        name: p.name,
+   198	        unit: p.unit,
+   199	        variantLabel,
+   200	        price_cash,
+   201	        price_crypto
+   202	      }, qty);
+   203	      openCart('cart');
+   204	    };
+   205	  });
+   206	}
+   207	function mediaEl(m) {
+   208	  if (m.type==='photo') { const img = document.createElement('img'); img.src=m.url; img.alt=''; return img; }
+   209	  if (m.type==='video') { const v = document.createElement('video'); v.src=m.url; v.controls=true; return v; }
+   210	  return null;
+   211	}
+   212	
+   213	
+   214	function addToCart(p, qty) {
+   215	  const existing = state.cart.items.find(x =>
+   216	    x.id === p.id && String(x.variantLabel||'') === String(p.variantLabel||'')
+   217	  );
+   218	  if (existing) {
+   219	    existing.qty += qty;
+   220	  } else {
+## GREP app.js
+29:  if (Array.isArray(state.products) && state.products.length>0 && !Array.isArray(state.products[0].quantities)) {
+30:    state.products[0].quantities = [
+93:    const hasVariants = Array.isArray(p.quantities) && p.quantities.length>0;
+101:      const first = p.quantities[0] || {price_cash:0, price_crypto:0};
+118:      const opts = p.quantities.map((q,i)=>`<option value="${i}">${q.label} — ${fmtEUR(q.price_cash||0)} / ${fmtEUR(q.price_crypto||0)}</option>`).join('');
+122:          <select class="variantSel" data-id="${p.id}">${opts}</select>
+131:        ${!hasVariants ? `<div class="qty"><label>Qté${unitInfo}</label><div class="qtybox"><button type="button" class="minus" data-id="${p.id}">−</button><input type="number" min="1" value="1" data-id="${p.id}" class="qtyInput"><button type="button" class="plus" data-id="${p.id}">+</button></div></div>` : ''}
+134:      <button class="primary" data-add="${p.id}">Ajouter au panier</button>
+143:      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+151:      const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+157:  root.querySelectorAll('select.variantSel').forEach(sel=>{
+163:      const v = (Array.isArray(p.quantities)&&p.quantities[idx]) ? p.quantities[idx] : null;
+172:  // Ajouter au panier
+183:      const select = root.querySelector(`select.variantSel[data-id="${id}"]`);
+184:      if (select && Array.isArray(p.quantities) && p.quantities.length>0) {
+186:        const v = p.quantities[idx] || {};
+191:        const input = root.querySelector('input.qtyInput[data-id="'+id+'"]');
+## NODE CHECKS
+v24.7.0
+## DEPLOY: /api/bot
+HTTP/2 405 
+age: 0
+cache-control: public, max-age=0, must-revalidate
+content-type: text/plain; charset=utf-8
+date: Fri, 19 Sep 2025 12:44:39 GMT
+server: Vercel
+strict-transport-security: max-age=63072000; includeSubDomains; preload
+x-vercel-cache: MISS
+x-vercel-id: cdg1::iad1::g9ldk-1758285878550-90e89a8d6274
+content-length: 18
+
+Method Not Allowed## DEPLOY: /api/products
+{"settings":{"shopName":"Your Store","description":"Bienvenue dans votre boutique.","faq":"Questions fréquentes : ...","contactUsername":"TonContactHumain","logoUrl":"","bgUrl":"","privateMode":false,"requiredChannel":"","channels":[],"admins":["7587681603"],"deliveryForm":{"fields":{"firstname":true,"lastname":true,"address1":true,"postalCode":true,"city":true,"country":true}}},"products":[{"media":[],"name":"Testtt","description":"Produit test","unit":"10g","price_cash":5,"price_crypto":4,"id":"p3deumx"}]}
+## DEPLOY: /webapp/index.html (head)
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Boutique</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="cart.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <div id="logoPh" class="logo-ph" aria-hidden="true">🛍️</div>
+      <img id="logo" alt="logo" />
+      <h1 id="shopTitle">Boutique</h1>
+    </div>
+    <nav class="tabs">
+      <button data-tab="products" class="active">Produits</button>
+      <button data-tab="description">Description</button>
+      <button data-tab="faq">FAQ</button>
+      <button data-tab="contact">Contact</button>
+    </nav>
+  </header>
+
+  <!-- bouton panier flottant -->
+  <button id="openCart" class="fab" aria-label="Voir le panier">🛍️</button>
+
+  <main id="app">
+    <section id="products" class="tab-panel active">
+      <div id="catalog"></div>
+    </section>
+    <section id="description" class="tab-panel">
+      <div id="descText"></div>
+    </section>
+    <section id="faq" class="tab-panel">
+      <pre id="faqText" class="pre"></pre>
+    </section>
+    <section id="contact" class="tab-panel">
+      <div id="contactBlock"></div>
+    </section>
+  </main>
+
+  <!-- Cart Modal -->
+  <dialog id="cartModal">
+    <form method="dialog" class="modal-card">
+      <header class="modal-header">
+        <h2 class="cart-title">Panier</h2>
+        <button id="closeCart" class="close" aria-label="Fermer">✕</button>
+      </header>
+      <section class="modal-body">
+        <!-- Étape 1 : récap panier -->
+        <div id="cartStep">
+          <div id="cartItems"></div>
+          <div class="row">
+            <button id="goCheckout" class="primary" type="button">Passer à la commande</button>
+          </div>
+        </div>
+        <!-- Étape 2 : livraison & paiement -->
+        <div id="deliveryStep" style="display:none">
+          <div class="row">
+            <label class="payment-option"><input type="radio" name="pay" value="cash" checked> Paiement cash</label>
+            <label class="payment-option"><input type="radio" name="pay" value="crypto"> Paiement crypto</label>
+          </div>
+          <div class="grid">
+            <input id="firstname" placeholder="Prénom">
+            <input id="lastname" placeholder="Nom">
+          </div>
+          <input id="address1" placeholder="Adresse complète (numéro, rue, etc.)">
+          <div class="grid">
+            <input id="postalCode" placeholder="Code postal">
+            <input id="city" placeholder="Ville">
+          </div>
+          <input id="country" placeholder="Pays">
+          <div class="row">
+            <button id="backToCart" type="button">Retour au panier</button>
+            <button id="placeOrder" class="primary" type="button" style="margin-left:auto">Valider ma commande</button>
+          </div>
+          <div id="result" class="note"></div>
+        </div>
+      </section>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+
+  <div id="lightbox" class="lb hidden" style="display:none"><button id="lbClose" class="lb-close" aria-label="Fermer">✕</button><div id="lbInner" class="lb-inner"></div></div>
+  <script src="enhance.js"></script>
+</body>
+</html>
+## DEPLOY: /webapp/app.js (grep)
+31:      {label:"10g",  price_cash:5,  price_crypto:6},
+93:    const hasVariants = Array.isArray(p.quantities) && p.quantities.length>0;
+101:      const first = p.quantities[0] || {price_cash:0, price_crypto:0};
+118:      const opts = p.quantities.map((q,i)=>`<option value="${i}">${q.label} — ${fmtEUR(q.price_cash||0)} / ${fmtEUR(q.price_crypto||0)}</option>`).join('');
+122:          <select class="variantSel" data-id="${p.id}">${opts}</select>
+157:  root.querySelectorAll('select.variantSel').forEach(sel=>{
+163:      const v = (Array.isArray(p.quantities)&&p.quantities[idx]) ? p.quantities[idx] : null;
+183:      const select = root.querySelector(`select.variantSel[data-id="${id}"]`);
+184:      if (select && Array.isArray(p.quantities) && p.quantities.length>0) {
+186:        const v = p.quantities[idx] || {};

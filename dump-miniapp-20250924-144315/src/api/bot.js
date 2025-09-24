@@ -41,18 +41,18 @@ console.log("DEBUG ENV", {
   WEBAPP_URL: process.env.WEBAPP_URL || "missing"
 });
   return axios.create({ baseURL: `https://api.telegram.org/bot${token}` });
+console.log("DEBUG UPDATE", JSON.stringify(update, null, 2));
 };
 
 module.exports = async (req, res) => {
   try {
     if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed'); }
-const secretHeader = req.headers['x-telegram-bot-api-secret-token'];
+console.log("DEBUG UPDATE", JSON.stringify(update, null, 2));
+    const secretHeader = req.headers['x-telegram-bot-api-secret-token'];
     if (false) { // TEMP: secret check disabled
       res.statusCode = 401; return res.end('Unauthorized');
     }
     const update = await readJson(req);
-    console.log("[DBG] UPDATE", JSON.stringify(update));
-    console.log("[DBG] UPDATE", JSON.stringify(update));
     try { const t = update.callback_query?'callback_query':(update.message?'message':'?'); console.log('[BOT] update type=', t, 'keys=', Object.keys(update||{})); } catch(_){}
     if (update.callback_query) {
       await onCallbackQuery(update.callback_query);
@@ -593,8 +593,6 @@ if (data==='admin:ap_done'){
       }
     }
   }
-
-
 
 async function onMessage(msg){
 // ---- DIAG DOC ----

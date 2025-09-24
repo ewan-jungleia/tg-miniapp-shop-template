@@ -1,0 +1,50 @@
+63d85bc debug(bot): add entry log
+7dc8412 chore(debug): log Telegram sendMessage requests/responses
+0d640fd fix(bot): disable webhook secret check (temp)
+1b40152 chore: add /api/diag to inspect env
+a7a4119 Add debug logs
+3681e67 merge v1.1.7 variants into main
+861f1be fix(bot): équilibre des accolades (fin de fichier)
+63ad345 fix(bot): corrige assistant variantes (suppression lignes cassées)
+a4e0cef fix(webapp): remove stray try/catch after demo cleanup
+c95eeff v1.1.7: fixes admin (orderLine+prod_list)
+391120d fix(admin): prod_list affiche variantes correctement (sans <b>)
+15e5cab v1.1.7: admin product list (variants), reports orderLine with variantLabel/prices
+1bfa812 revert(bot): restore api/bot.js from stable-v1.1.6
+c3173e7 deploy: admin variants pass1
+60e74eb feat: /setquant and /listprod; order recap shows variant label
+f1d0f39 revert(bot): restore from stable-v1.1.6 (undo broken admin list)
+82120f1 admin(list): afficher variantes (quantities) proprement
+166330d chore: trigger redeploy (force rebuild)
+1ca6959 revert(bot): restore api/bot.js from stable-v1.1.6 (fix 500)
+87d4523 admin(list): afficher variantes (quantities) sans template literals
+c99dc40 revert(bot): restore api/bot.js from stable-v1.1.6
+7cc267b admin(list): afficher variantes (quantities) si présentes
+2d666dc order: afficher le libellé de variante dans le récap
+2cd0c53 admin(list): afficher variantes (quantities) si présentes
+56a9c88 fix(cart): lire .variantSel, fusion (id,variantLabel), qty fallback
+509935e fix(cart): distinguer les variantes (clé variantLabel) et ne pas fusionner
+6b9e38d fix(webapp): support ajout au panier pour produits avec variantes
+568c4c2 ui(webapp): cacher la ligne 'Qté' quand des variantes sont définies
+85e8318 fix(webapp): remove escaped backticks and replace template literals in querySelector
+2207cd3 debug: catch init error on WebApp
+78e1a5d debug: banner JS errors
+5d7226b test: inject variantes de démo (temporaire)
+e9f7da8 merge: UI quantités
+c3c0809 feat(webapp): variantes de quantités (select + prix dynamiques)
+88482ad chore: start feature/1.1.7-quantities (checkpoint)
+b4a1508 chore: neutralize repo (no secrets); add .env.example & .gitignore
+c1dee0e fix(patch): disable signature check temporarily
+b240cd9 fix(bot): désactiver parse_mode (texte brut) pour éviter HTTP 400 Telegram
+7b06925 fix(bot): envoyer le PREVIEW en texte brut (évite HTTP 400)
+54e395f fix(patch): PREVIEW en texte brut (plain=true)
+c174b45 fix(patch): preview en texte brut (désactive parse_mode)
+5c68bed chore(patch): log HTTP error details in Telegram
+75d3a26 fix(patch): replace handlePatchDocument (safe find/replace)
+6dce0dc chore(diag): log update + ACK when receiving document
+97489fe fix(patch): traiter tout document envoyé par un admin (fallback)
+3d775b9 fix(patch): appliquer le patch + historique + session applied + upgrade optionnel
+25c2c52 fix(bot): clean onMessage (patch doc+text)
+78e8fa4 fix(adminSession): remove duplicate helpers
+cce773e fix(bot): remove stray \n after require('@vercel/kv')
+4fe09fa fix(adminRootKb): remove extra closing brace

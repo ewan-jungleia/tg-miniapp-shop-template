@@ -1,0 +1,2 @@
+.payment-option{background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#111);border:1px solid var(--tg-theme-secondary-bg-color,#e5e7eb);border-radius:10px;padding:10px 12px;display:inline-flex;align-items:center;gap:8px;font-weight:500}
+.payment-option input[type="radio"]{accent-color:var(--tg-theme-button-color,#1d4ed8)}

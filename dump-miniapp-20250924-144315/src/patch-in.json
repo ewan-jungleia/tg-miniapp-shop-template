@@ -1,0 +1,22 @@
+{
+  "version": "1.1.7",
+  "data": {
+    "ops": [
+      {
+        "op": "kv.set",
+        "key": "settings",
+        "value": {
+          "shopName": "Boutique",
+          "description": "Bienvenue dans la boutique. Produits démo.",
+          "faq": "Q: Livraison ?\nR: Par colis.\n\nQ: Paiement ?\nR: Cash ou crypto (redirigé vers contact humain en V1).",
+          "contactUsername": "TonContactHumain",
+          "privateMode": false,
+          "requiredChannel": "",
+          "channels": [],
+          "admins": ["YOUR_TELEGRAM_ID"],
+          "deliveryForm": { "fields": { "firstname": true, "lastname": true, "address1": true, "postalCode": true, "city": true, "country": true } }
+        }
+      }
+    ]
+  }
+}

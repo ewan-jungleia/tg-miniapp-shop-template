@@ -1,0 +1,17 @@
+Vercel CLI 48.1.4
+Retrieving project…
+> Environment Variables found for antoines-projects-827957b0/tg-miniapp-shop-template [221ms]
+
+ name                               value               environments                        created    
+ KV_URL                             Encrypted           Production, Preview, Development    2d ago     
+ KV_REST_API_READ_ONLY_TOKEN        Encrypted           Production, Preview, Development    2d ago     
+ REDIS_URL                          Encrypted           Production, Preview, Development    2d ago     
+ KV_REST_API_TOKEN                  Encrypted           Production, Preview, Development    2d ago     
+ KV_REST_API_URL                    Encrypted           Production, Preview, Development    2d ago     
+ VERCEL_DEPLOY_HOOK_URL             Encrypted           Development, Preview, Production    8d ago     
+ PATCH_SECRET                       Encrypted           Development, Preview, Production    8d ago     
+ APP_VERSION                        Encrypted           Development, Preview, Production    8d ago     
+ WEBAPP_URL                         Encrypted           Development, Preview, Production    8d ago     
+ TELEGRAM_WEBHOOK_SECRET            Encrypted           Development, Preview, Production    8d ago     
+ TELEGRAM_BOT_TOKEN                 Encrypted           Development, Preview, Production    8d ago     
+

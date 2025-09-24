@@ -1,0 +1,41 @@
+{
+  "version": "1.1.6",
+  "type": "data",
+  "issued_at": "2025-09-16T16:58:11.586Z",
+  "notes": "reset neutre (settings+products)",
+  "upgrade": false,
+  "ops": [
+    {
+      "op": "kv.set",
+      "key": "settings",
+      "value": {
+        "shopName": "Your Store",
+        "description": "Bienvenue dans votre boutique.",
+        "faq": "Questions fréquentes : ...",
+        "contactUsername": "TonContactHumain",
+        "logoUrl": "",
+        "bgUrl": "",
+        "privateMode": false,
+        "requiredChannel": "",
+        "channels": [],
+        "admins": [],
+        "deliveryForm": {
+          "fields": {
+            "firstname": true,
+            "lastname": true,
+            "address1": true,
+            "postalCode": true,
+            "city": true,
+            "country": true
+          }
+        }
+      }
+    },
+    {
+      "op": "kv.set",
+      "key": "products",
+      "value": []
+    }
+  ],
+  "sign": "hmac-sha256=f8a84de27d44c4b12e328c7d7a3302280e3f32917ea57a95e810225780925a09"
+}
